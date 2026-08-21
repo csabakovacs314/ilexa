@@ -1,6 +1,6 @@
 # mail-deploy — Complete Guide
 
-A detailed reference for the interactive EL9/EL10 mail-server deployer: what it builds,
+A detailed reference for the interactive EL9/EL10 + Ubuntu LTS mail-server deployer: what it builds,
 how it works internally, every option, prerequisites, recommendations, and the
 post-install steps you must complete yourself.
 
@@ -37,6 +37,11 @@ stack from parameterized templates:
 | Brute-force    | Fail2Ban                                             |
 | Firewall       | firewalld geoblock + OTX IP block ipsets             |
 | Threat-intel   | AlienVault OTX (IP block + URI→rspamd + rbldnsd DNSBL) |
+| User filtering | Sieve + ManageSieve (server-side rules, editable from webmail) |
+| Quotas         | PostfixAdmin per-mailbox quotas, enforced at SMTP time |
+| Inbound TLS    | MTA-STS + TLS-RPT + DANE/TLSA record generation      |
+| Client setup   | Thunderbird autoconfig + Outlook autodiscover        |
+| Observability  | SIEM export (rsyslog forward, opt-in), Prometheus node_exporter (opt-in) |
 | Maintenance    | dnf-automatic security updates, backups, auto-reboot |
 
 **Design principle:** *template, never copy live config.* Nothing from the
@@ -179,12 +184,14 @@ These are the keys in `answers.example.conf` (and the questions the wizard asks)
 | `MAIL_HOSTNAME` | Short hostname | derived from FQDN |
 | `PRIMARY_DOMAIN` | Primary virtual mail domain | derived from FQDN |
 | `EXTRA_DOMAINS` | Space-separated additional domains | empty |
+| `TIMEZONE` | System + PHP timezone | `Europe/Budapest` |
 
 ### Admin
 | Key | Meaning | Default |
 |-----|---------|---------|
 | `ADMIN_EMAIL` | PostfixAdmin superadmin login + alert destination | `postmaster@…` |
 | `ADMIN_PASSWORD` | Superadmin password (blank ⇒ auto-generated) | auto |
+| `PFA_ADMIN_PASSWORD` | `postfixadmin@<fqdn>` mailbox password (blank ⇒ auto-generated) | auto |
 
 ### Storage / TLS
 | Key | Meaning | Default |
@@ -201,6 +208,8 @@ These are the keys in `answers.example.conf` (and the questions the wizard asks)
 | `SPAM_REWRITE_SUBJECT` | Score at which the subject gets tagged | `6` |
 | `SPAM_REJECT` | Safety-net reject threshold; also arms the ClamAV virus reject | `15` |
 | `SPAM_SUBJECT_TAG` | Subject prefix applied at the rewrite threshold | `{Spam?}` |
+| `ENABLE_MX_CHECK` | Probe the envelope-from domain's MX (rspamd `mx_check`; uses the module's own built-in symbol scores, fails open if outbound :25 is blocked) | `yes` |
+| `ENABLE_KNOWN_SENDERS` | Per-sender reputation for freemail domains, where domain reputation is meaningless; needs accumulated history before its symbols fire | `yes` |
 
 Content filtering is **rspamd only** — this replaces the old `SA_THRESHOLD`; there
 is no separate SpamAssassin-style single score, just the three thresholds above.
@@ -286,6 +295,8 @@ Two things reduce exposure and are worth knowing before you decide:
 | `ABUSECH_API_KEY` | abuse.ch key (URLhaus/ThreatFox/Feodo) | empty |
 | `ABUSEIPDB_API_KEY` | AbuseIPDB key | empty |
 | `ENABLE_BREACH_CHECK` | XposedOrNot breach lookups in the console | `no` |
+| `ABUSIX_API_KEY` | Abusix Mail Intelligence datafeed key (postscreen/rspamd DNSBL zones; console-editable later) | empty |
+| `SPAMHAUS_DQS_KEY` | Spamhaus DQS key (zen/DBL/ZRD zones; console-editable later) | empty |
 
 Any source whose key is left blank is skipped rather than failing the install.
 
@@ -295,6 +306,7 @@ Any source whose key is left blank is skipped rather than failing the install.
 | `ENABLE_OTX` | Install the OTX suite | `yes` |
 | `OTX_API_KEY` | Your OTX key (blank ⇒ set later in `/etc/ilexa/secrets/otx_api_key`) | empty |
 | `OTX_TRUSTED_CIDRS` | Extra never-block CIDRs (CF/Google already covered) | empty |
+| `ENABLE_OTX_URI` | OTX URI feed → rspamd url multimap (symbol `FEED_OTX_URI`) | `no` |
 
 ### Optional extras
 | Key | Meaning | Default |
@@ -302,6 +314,10 @@ Any source whose key is left blank is skipped rather than failing the install.
 | `ENABLE_LAST_LOGIN` | Dovecot last-login tracking | `yes` |
 | `ENABLE_FTS_XAPIAN` | Full-text search (compiled; RAM-heavy) | `yes` |
 | `ENABLE_UNATTENDED` | dnf-automatic security updates | `yes` |
+| `ENABLE_FTS_OPTIMIZE` | Weekly RAM-capped compaction of the fts_xapian indexes (skips indexes too large to compact safely; console-switchable afterwards) | `yes` |
+| `ENABLE_UNOFFICIAL_SIGS` | Third-party ClamAV signatures + YARA rules (`clamav-unofficial-sigs`); required by the console's signature/YARA panel. EL only | `yes` |
+| `ENABLE_SIEM_EXPORT` | Seed the rsyslog SIEM-forward config (Fail2Ban / Apache-SSL errors / console audit → local2-4). The console's Rendszer → SIEM card owns it afterwards; actual forwarding stays off until a collector is configured there | `no` |
+| `HU_CLASSIFY_REPORT_EMAIL` | Destination for the fortnightly `41-hu-classify` auto-review report | empty |
 
 ### Hardening (secure-by-default)
 | Key | Meaning | Default |
@@ -314,7 +330,9 @@ Any source whose key is left blank is skipped rather than failing the install.
 | `HARDEN_KERNEL_AUTOREBOOT` | Scheduled maintenance-window reboot | `yes` |
 | `HARDEN_SMTP_TUNING` | `message_size_limit` 50 MB + `smtpd_delay_reject=yes` | `yes` |
 | `MESSAGE_SIZE_LIMIT` | Max message size in bytes | `52428800` (50 MiB) |
+| `SENDER_LOGIN_POLICY` | May an authenticated user put someone else's address in MAIL FROM? `warn` logs violations, `enforce` rejects, `off` disables. Start with `warn`, review the log, then enforce | `warn` |
 | `BACKUP_TARGET` | Backup destination (empty ⇒ module inert) | empty |
+| `BACKUP_PASSPHRASE` | If set, DB dumps are gpg-encrypted at rest (they contain password hashes) | empty |
 
 ---
 
@@ -402,11 +420,13 @@ so a missing value is caught immediately, not silently shipped.
 
 | Module | What it does |
 |--------|--------------|
-| `00-preflight` | EL9/EL10 + root gate; warns on unresolved FQDN, low RAM, busy ports, disk. |
+| `00-preflight` | OS gate (EL9/EL10, Ubuntu LTS) + root check; warns on unresolved FQDN, low RAM, busy ports, disk. |
 | `05-base` | EPEL, PHP module stream (EL9 only — EL10 ships PHP unmodularized), `mtagroup`, swapfile if short, sysctl tuning, crypto-policy DEFAULT. |
 | `10-mariadb` | Install + localhost bind + 512 MB pool; creates `postfix`/`roundcube` DBs with generated passwords. |
 | `20-postfix` | Renders `main.cf`/`master.cf`; writes the 8 MySQL maps with a dedicated `postfix` DB user; postscreen DNSBLs. |
 | `25-dovecot` | SQL auth, Maildir, TLS, gz storage; optional `last_login` and `fts_xapian` (built from source, only enabled if the `.so` verifies). |
+| `26-sieve` | Sieve server-side filtering + ManageSieve on 4190 (dovecot-pigeonhole; Roundcube `managesieve` plugin wired in `50-web`). |
+| `27-quota` | PostfixAdmin per-mailbox quotas, enforced at SMTP time via Dovecot's `quota-status` policy (delivery bypasses LDA/LMTP, so RCPT-time rejection is the only enforcement point); IMAP QUOTA reporting on. |
 | `30-auth` | OpenDKIM per-domain 2048-bit keys (+ DNS records), OpenDMARC, policyd-spf. |
 | `35-clamav` | Enables freshclam (auto-updating defs) + clamd, called through rspamd. |
 | `40-rspamd` | rspamd as the sole mail filter (`add_header 4 / rewrite_subject 6 / reject 15`); ClamAV wired in as `CLAM_VIRUS`; `_rspamd` added to `mtagroup` so it can reach the clamd socket. |
@@ -416,12 +436,17 @@ so a missing value is caught immediately, not silently shipped.
 | `57-archive` | Opt-in central mail archive (always-bcc into one admin-readable mailbox); off by default because of its legal/GDPR weight. |
 | `60-firewalld` | Public zone, geoblock + OTX ipsets, drop rules (port 25 never dropped). |
 | `65-fail2ban` | sshd / postfix-sasl / dovecot / apache jails, 1 h ban + escalation. |
+| `66-siem-export` | Seeds the rsyslog SIEM-forward config once via `qa-siem-config.sh`; the console's Rendszer → SIEM card is the sole owner afterwards. Forwarding stays off until a collector is configured there. |
 | `70-otx` | The OTX suite: IP block, URI→rspamd, rbldnsd port-25 DNSBL, soft-fail cron. |
 | `72-feeds` | Opt-in reputation/blocklist feeds (URLhaus, Spamhaus DROP, ThreatFox/Feodo, disposable domains); every updater is installed, only key-bearing sources are enabled. |
 | `75-tls-dns` | certbot (self-signed fallback) + unbound as local resolver. |
+| `76-mta-sts` | MTA-STS policy served over HTTPS, TLS-RPT, DANE/TLSA generation; all DNS records written to `/root/mail-deploy-dns-extra.txt`. Runs after web (50) + TLS (75). |
+| `78-autoconfig` | Thunderbird autoconfig + Outlook autodiscover from `autoconfig.`/`autodiscover.<domain>` (cert SANs handled in `75-tls-dns`). |
 | `80-unattended` | dnf-automatic security-only, **excludes `dovecot*`** (fts ABI safety). |
+| `82-metrics` | Optional Prometheus `node_exporter`: localhost-bound by default; `METRICS_SCRAPE_CIDR` opens 9100 to exactly that CIDR. |
 | `85-hardening` | SSH key-only (+ admin user), SELinux opt-in, Webmin allowlist, auto-reboot, backups. |
 | `90-enable` | Enables + starts all services in order. |
+| `95-sources` | Initial fetch for every enabled reputation source — without it a fresh install's feeds sit empty until their first 03:00-ish cron (geoblock: Monday). Soft-fails per source rather than failing the install. |
 | `99-verify` | Non-destructive self-check + prints the DNS records you must set. |
 
 ---
@@ -599,7 +624,8 @@ an existing one).
 | **fail2ban recidive** | (always on with fail2ban) | — | Week-long ban for IPs that repeatedly trip other jails. |
 | **Prometheus metrics** | `ENABLE_METRICS`, `METRICS_SCRAPE_CIDR` | off | `node_exporter` bound to localhost (scrape via SSH tunnel) or, if a scrape CIDR is given, bound to `0.0.0.0:9100` with a firewalld rule opening 9100 **only** to that CIDR. |
 | **Autoconfig / autodiscover** | `ENABLE_AUTOCONFIG` | on | Thunderbird autoconfig + Outlook autodiscover served from `autoconfig.<domain>` / `autodiscover.<domain>` (cert SANs added once the CNAMEs resolve — see §TLS) so mail clients self-configure. CNAMEs written to `mail-deploy-dns-extra.txt`. |
-| **Language signals (experimental)** | `ENABLE_HU_CLASSIFY` | off | Module `41-hu-classify`. See the honest status below before enabling. |
+| **SIEM export** | `ENABLE_SIEM_EXPORT` | off | Module `66-siem-export` seeds the rsyslog forward config (Fail2Ban bans, Apache SSL-vhost errors i.e. console sign-in attempts, and the console's own audit trail → rsyslog local2-4). After install the console's **Rendszer → SIEM** card owns it entirely: collector host/port/protocol, optional TLS with a pasted CA certificate, and an automatic health check that alerts when forwarding wedges. Nothing leaves the server until a collector is configured there. |
+| **Language signals (experimental)** | `ENABLE_HU_CLASSIFY`, `HU_CLASSIFY_REPORT_EMAIL` | off | Module `41-hu-classify`. The report email receives a fortnightly auto-review of the signals' measured performance. See the honest status below before enabling. |
 
 #### Language signals — measured status (read this before enabling)
 
