@@ -424,8 +424,8 @@ so a missing value is caught immediately, not silently shipped.
 |--------|--------------|
 | `00-preflight` | OS gate (EL9/EL10, Ubuntu LTS) + root check; warns on unresolved FQDN, low RAM, busy ports, disk. |
 | `05-base` | EPEL, PHP module stream (EL9 only — EL10 ships PHP unmodularized), `mtagroup`, swapfile if short, sysctl tuning, crypto-policy DEFAULT. |
-| `10-mariadb` | Install + localhost bind + 512 MB pool; creates `postfix`/`roundcube` DBs with generated passwords. |
-| `20-postfix` | Renders `main.cf`/`master.cf`; writes the 8 MySQL maps with a dedicated `postfix` DB user; postscreen DNSBLs. |
+| `10-mariadb` | Install + localhost bind + 512 MB pool; creates `postfix`/`roundcube` DBs with generated passwords, plus the ungranted read-only `postfix_maps` user (grants come from `50-web` once the schema exists). |
+| `20-postfix` | Renders `main.cf`/`master.cf`; writes the 9 MySQL maps with the read-only `postfix_maps` user (column-scoped — cannot read `mailbox.password`); postscreen DNSBLs. |
 | `25-dovecot` | SQL auth, Maildir, TLS, gz storage; optional `last_login` and `fts_xapian` (built from source, only enabled if the `.so` verifies). |
 | `26-sieve` | Sieve server-side filtering + ManageSieve on 4190 (dovecot-pigeonhole; Roundcube `managesieve` plugin wired in `50-web`). |
 | `27-quota` | PostfixAdmin per-mailbox quotas, enforced at SMTP time via Dovecot's `quota-status` policy (delivery bypasses LDA/LMTP, so RCPT-time rejection is the only enforcement point); IMAP QUOTA reporting on. |
@@ -433,7 +433,7 @@ so a missing value is caught immediately, not silently shipped.
 | `35-clamav` | Enables freshclam (auto-updating defs) + clamd, called through rspamd. |
 | `40-rspamd` | rspamd as the sole mail filter (`add_header 4 / rewrite_subject 6 / reject 15`); ClamAV wired in as `CLAM_VIRUS`; `_rspamd` added to `mtagroup` so it can reach the clamd socket. |
 | `41-hu-classify` | Opt-in (`ENABLE_HU_CLASSIFY`, default `no`), experimental. Language, text-coherence and (where a host has trained one) spam-router signals, computed by a small local Python service. **All symbols are weight 0.0** — see §13 for what each one actually measures and why none is a rule. Installs inert; the console's Rendszer page is the on/off switch. |
-| `50-web` | Apache + PHP, security headers, PostfixAdmin, Roundcube + password plugin. |
+| `50-web` | Apache + PHP, security headers, PostfixAdmin (+ its schema, then the `postfix_maps` column-level SELECT grants), Roundcube + password plugin. |
 | `55-ilexa` | Deploys the ilexa console from the bundle built by `tools/bundle-ilexa.sh`; Apache alias + Basic auth, root helpers, sudoers, DB read-only user, map seeding, crons. Runs after `50-web` and `40-rspamd`. |
 | `57-archive` | Opt-in central mail archive (always-bcc into one admin-readable mailbox); off by default because of its legal/GDPR weight. |
 | `58-report-learn` | spam@/ham@ report addresses in every mail domain: dedicated `rspamreport` user, hardened python3 handler (attachment-extract → strip scanner headers → rspamd Bayes learn + local fuzzy add/del, spam copies saved to the reporter's Spam folder via a one-command sudoers rule), master.cf pipe services + transport routing + alias rows. Never clobbers an existing spam@/ham@. |
@@ -623,8 +623,11 @@ of the same facts.
   if any audited pattern (key shapes, private-key blocks, internal material)
   appears in the result.
 - **Least privilege:** MariaDB binds to localhost only; each app has its own DB
-  user scoped to its own database; Webmin can be source-IP allowlisted; port 25 is
-  open to the world (it must be) but everything else can be geo/OTX-dropped.
+  user scoped to its own database; the Postfix SQL maps use a separate
+  read-only user with column-level grants (it cannot read password hashes, and
+  a leak of the group-readable map files grants no write access); Webmin can
+  be source-IP allowlisted; port 25 is open to the world (it must be) but
+  everything else can be geo/OTX-dropped.
 
 ---
 

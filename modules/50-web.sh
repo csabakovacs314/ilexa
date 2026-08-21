@@ -279,6 +279,30 @@ deploy_postfixadmin() {
     sudo -u "$WEB_USER" php "$dir/public/upgrade.php" >/dev/null 2>&1 && log_info "PostfixAdmin schema applied" \
       || log_warn "PostfixAdmin schema step needs manual run (public/upgrade.php)"
   fi
+
+  # Column-level SELECT grants for the read-only Postfix maps user (created
+  # ungranted by 10-mariadb; the maps rendered by 20-postfix use it). Applied
+  # here because the tables only exist once upgrade.php has run. The column
+  # lists are exactly what the map queries read -- notably NOT
+  # mailbox.password, so a leak of the group-readable map files cannot expose
+  # password hashes. A failed upgrade.php above makes these fail too; the
+  # warning names the fix (re-run this module).
+  if [ "$DRY_RUN" != 1 ]; then
+    local _h _grants_ok=1
+    for _h in localhost 127.0.0.1; do
+      db_exec "GRANT SELECT (domain, active) ON postfix.domain TO 'postfix_maps'@'${_h}';
+               GRANT SELECT (address, goto, active) ON postfix.alias TO 'postfix_maps'@'${_h}';
+               GRANT SELECT (alias_domain, target_domain, active) ON postfix.alias_domain TO 'postfix_maps'@'${_h}';
+               GRANT SELECT (username, maildir, quota, active) ON postfix.mailbox TO 'postfix_maps'@'${_h}';" \
+        || _grants_ok=0
+    done
+    db_exec "FLUSH PRIVILEGES;" || true
+    if [ "$_grants_ok" = 1 ]; then
+      log_info "postfix_maps: column-level SELECT grants applied"
+    else
+      log_warn "postfix_maps grants failed (schema missing?) — mail routing will fail until you re-run --only 50-web"
+    fi
+  fi
 }
 
 # ---- Roundcube (webmail) ---------------------------------------------------

@@ -65,12 +65,17 @@ if [ "$DRY_RUN" != 1 ] && [ -n "$_prev_always_bcc" ]; then
 fi
 render "$MD_TEMPLATES/postfix/master.cf.tmpl" /etc/postfix/master.cf
 
-# --- MySQL virtual maps (dedicated postfix DB user, never root) ---
+# --- MySQL virtual maps (read-only maps user, never root, never the RW user) --
+# postfix_maps (created by 10-mariadb, column-level SELECT grants applied by
+# 50-web once the schema exists) can read exactly the columns these queries
+# name and nothing else -- in particular not mailbox.password. The read-write
+# 'postfix' user stays with PostfixAdmin/Dovecot (Dovecot auth needs the
+# password hashes, so it cannot use this user).
 write_sql_map() { # filename  query
   write_file "/etc/postfix/sql/$1" 640 "root:postfix" <<EOF
 # $1 — rendered by mail-deploy
-user = ${POSTFIX_DB_USER:-postfix}
-password = ${POSTFIX_DB_PASS:-CHANGEME}
+user = postfix_maps
+password = ${POSTFIX_MAPS_PASS:-CHANGEME}
 hosts = 127.0.0.1
 dbname = postfix
 query = $2
