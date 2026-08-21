@@ -332,7 +332,7 @@ Any source whose key is left blank is skipped rather than failing the install.
 | `HARDEN_KERNEL_AUTOREBOOT` | Scheduled maintenance-window reboot | `yes` |
 | `HARDEN_SMTP_TUNING` | `message_size_limit` 50 MB + `smtpd_delay_reject=yes` | `yes` |
 | `MESSAGE_SIZE_LIMIT` | Max message size in bytes | `52428800` (50 MiB) |
-| `SENDER_LOGIN_POLICY` | May an authenticated user put someone else's address in MAIL FROM? `warn` logs violations, `enforce` rejects, `off` disables. Start with `warn`, review the log, then enforce | `warn` |
+| `SENDER_LOGIN_POLICY` | May an authenticated user put someone else's address in MAIL FROM? `warn` logs violations, `enforce` rejects, `off` disables. Start with `warn`, review the log, then enforce. Legitimise hosted-domain delegations by adding the address to the sender's alias goto; for senders in *unhosted* domains (e.g. a customer device sending as its own external address), add a `<sender> <sasl-user>` line to `/etc/postfix/sender_login_exceptions` and `postmap` it | `warn` |
 | `BACKUP_TARGET` | Backup destination (empty ⇒ module inert) | empty |
 | `BACKUP_PASSPHRASE` | If set, DB dumps are gpg-encrypted at rest (they contain password hashes) | empty |
 

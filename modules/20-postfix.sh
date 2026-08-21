@@ -130,6 +130,14 @@ if [ "$DRY_RUN" != 1 ]; then
     fi
   fi
   [ -e /etc/postfix/transport ] || cp "$MD_TEMPLATES/postfix/transport" /etc/postfix/transport
+  # Sender-identity guard exceptions (see smtpd_sender_login_maps in the
+  # main.cf template): seeded once, then owned by the operator. Must exist
+  # even empty -- a missing hash: map is a hard error for every smtpd lookup.
+  if [ ! -e /etc/postfix/sender_login_exceptions ]; then
+    printf '# Sender-identity guard exceptions: <sender-address> <sasl-username>.\n# For senders the alias model cannot express (addresses in unhosted domains).\n# Run `postmap /etc/postfix/sender_login_exceptions` after every edit.\n' \
+      > /etc/postfix/sender_login_exceptions
+  fi
+  postmap /etc/postfix/sender_login_exceptions
 fi
 
 if [ "$DRY_RUN" != 1 ]; then

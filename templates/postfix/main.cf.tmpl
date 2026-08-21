@@ -192,9 +192,15 @@ resolve_dequoted_address = no
 # below. (The reference host had the map configured and no clause, i.e. it was
 # loaded and never read.)
 #
-# Owners come from two maps: a mailbox owns its own address, and an alias is
-# owned by its goto targets (so members of a shared role alias can use it).
+# Owners come from three maps: a mailbox owns its own address, an alias is
+# owned by its goto targets (so members of a shared role alias can use it),
+# and the exceptions file covers what neither can express -- a user allowed
+# to send as an address in a domain this server does not host at all (e.g. a
+# customer's scan-to-email device sending as their own external business
+# address). Edit the file, `postmap` it, done -- smtpd processes are
+# short-lived, so new connections pick up the rebuilt .db without a reload.
 smtpd_sender_login_maps =
+    hash:/etc/postfix/sender_login_exceptions
     proxy:mysql:/etc/postfix/sql/mysql-email2email.cf
     proxy:mysql:/etc/postfix/sql/mysql-sender-login-alias.cf
 
