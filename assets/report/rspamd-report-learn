@@ -1,0 +1,150 @@
+#!/usr/bin/python3
+# ─────────────────────────────────────────────────────────────────
+#  rspamd-report-learn — learn a user-reported message into rspamd Bayes.
+#
+#  Pipe target for the report addresses (Postfix local(8) via /etc/aliases,
+#  runs as 'nobody'):
+#     rspamlearn-spam: "|/usr/local/sbin/rspamd-report-learn spam"
+#     rspamlearn-ham:  "|/usr/local/sbin/rspamd-report-learn ham"
+#
+#  The Thunderbird "Report Spam" (RENATER) add-on forwards the ORIGINAL
+#  message as a message/rfc822 attachment. We extract that original, strip
+#  scanner-added headers, and feed it to `rspamc learn_<class>` on localhost
+#  (controller trusts 127.0.0.1 → no password).
+#
+#  Hardening: internal-sender only, size caps, global rate limit, must carry
+#  a message/rfc822 attachment. Always exits 0 (never bounce/defer a report).
+#  Every outcome is logged to syslog (mail facility → /var/log/maillog).
+# ─────────────────────────────────────────────────────────────────
+import sys, os, re, time, subprocess, syslog
+from email.parser import BytesParser
+from email.policy import compat32
+
+CLASS        = sys.argv[1] if len(sys.argv) > 1 else ''
+# Sender comes from the Postfix pipe argv (${sender}); env SENDER is a fallback
+# (the pipe(8) transport, unlike local(8), does not export it reliably).
+SENDER       = (sys.argv[2] if len(sys.argv) > 2 and sys.argv[2] else (os.environ.get('SENDER') or ''))
+SENDER       = SENDER.lower().strip().strip('<>')
+STATE_DIR    = '/var/lib/rspamd-report'
+DOMAINS_FILE = '/etc/rspamd-report/domains.txt'
+MAX_TOTAL    = 8 * 1024 * 1024      # whole report cap
+MAX_ORIG     = 4 * 1024 * 1024      # extracted original cap
+RATE_MAX     = 120                  # max learns per window
+RATE_WIN     = 60                   # seconds
+
+syslog.openlog('rspamd-report', syslog.LOG_PID, syslog.LOG_MAIL)
+def done(msg, learned=False):
+    syslog.syslog(syslog.LOG_INFO, f'class={CLASS} sender=<{SENDER}> {"LEARN" if learned else "skip"}: {msg}')
+    sys.exit(0)                     # never bounce/defer
+
+if CLASS not in ('spam', 'ham'):
+    done('bad class argument')
+
+data = sys.stdin.buffer.read(MAX_TOTAL + 1)
+if len(data) > MAX_TOTAL:
+    done('report too large')
+
+# ── internal-sender check ──
+ours = set()
+try:
+    ours = {l.strip().lower() for l in open(DOMAINS_FILE) if l.strip()}
+except OSError:
+    pass
+dom = SENDER.rsplit('@', 1)[-1] if '@' in SENDER else ''
+if not dom or dom not in ours:
+    done('sender not an internal domain')
+
+# ── global rate limit (simple per-window counter) ──
+try:
+    os.makedirs(STATE_DIR, exist_ok=True)
+    win = int(time.time()) // RATE_WIN
+    rf  = os.path.join(STATE_DIR, 'rate')
+    cnt = 0
+    try:
+        p0, c0 = open(rf).read().split()
+        if int(p0) == win:
+            cnt = int(c0)
+    except (OSError, ValueError):
+        pass
+    if cnt >= RATE_MAX:
+        done('rate limit exceeded')
+    with open(rf, 'w') as f:
+        f.write(f'{win} {cnt + 1}')
+except OSError:
+    pass                            # never fail closed on state errors
+
+# ── extract the original (message/rfc822 attachment) ──
+msg  = BytesParser(policy=compat32).parsebytes(data)
+orig = None
+for part in msg.walk():
+    if part.get_content_type() == 'message/rfc822':
+        pl = part.get_payload()
+        orig = pl[0].as_bytes() if isinstance(pl, list) and pl else part.get_payload(decode=True)
+        break
+if not orig:
+    done('no message/rfc822 attachment')
+if len(orig) > MAX_ORIG:
+    done('original too large')
+
+# ── strip scanner-added headers so Bayes isn't taught our own tokens ──
+def strip_headers(raw: bytes) -> bytes:
+    text = raw.decode('utf-8', 'surrogateescape')
+    parts = re.split(r'\r?\n\r?\n', text, maxsplit=1)
+    head, body = parts[0], (parts[1] if len(parts) > 1 else '')
+    out, skip = [], False
+    for line in head.split('\n'):
+        if line[:1] in (' ', '\t'):
+            if skip:
+                continue
+        else:
+            skip = bool(re.match(r'^(x-spam|x-spamd-result|x-rspamd|x-[a-z0-9-]*mailscanner)', line, re.I))
+            if skip:
+                continue
+        out.append(line)
+    return ('\n'.join(out) + '\n\n' + body).encode('utf-8', 'surrogateescape')
+
+orig_raw   = orig                    # as-received original (for saving to Spam)
+learn_body = strip_headers(orig_raw) # scanner headers removed (for Bayes)
+
+# ── save a copy into the reporter's Spam folder (SPAM class only) so that
+#    POP3-reported spam is visible in the Karantén admin tool. Runs as the
+#    dedicated 'rspamreport' user; the sudoers rule allows only `doveadm save
+#    -u <user> -m Spam` (append-only, Spam mailbox). Best-effort: a save
+#    failure is logged but never blocks learning. Ham is never saved to Spam.
+saved = 'n/a'
+if CLASS == 'spam':
+    try:
+        marker = f'X-Reported-Via: pop3-forward; by {SENDER}\n'.encode('utf-8', 'surrogateescape')
+        sp = subprocess.run(['/usr/bin/sudo', '/usr/bin/doveadm', 'save',
+                             '-u', SENDER, '-m', 'Spam'],
+                            input=marker + orig_raw, capture_output=True, timeout=30)
+        saved = 'ok' if sp.returncode == 0 else f'fail({sp.returncode})'
+        if sp.returncode != 0:
+            syslog.syslog(syslog.LOG_WARNING, f'class=spam sender=<{SENDER}> save-failed: '
+                + (sp.stdout + sp.stderr).decode('utf-8', 'replace').replace('\n', ' ')[:200])
+    except Exception as e:
+        saved = 'error'
+        syslog.syslog(syslog.LOG_WARNING, f'class=spam sender=<{SENDER}> save-error: {e}')
+
+# ── local fuzzy storage ──
+# Spam report → fuzzy_add (flag 11 = FUZZY_LOCAL_DENIED) so near-duplicate spam is caught
+# server-wide. Ham report → fuzzy_del (undo a mistaken add — self-correcting). Best-effort;
+# never blocks Bayes learning. Uses the header-stripped body for a stable hash.
+fuzzy = 'n/a'
+try:
+    fz_cmd = 'fuzzy_add' if CLASS == 'spam' else 'fuzzy_del'
+    fp = subprocess.run(['/usr/bin/rspamc', '-h', '127.0.0.1:11334', '-f', '11', '-w', '1', fz_cmd],
+                        input=learn_body, capture_output=True, timeout=30)
+    fuzzy = f'{fz_cmd}:{"ok" if fp.returncode == 0 else "rc" + str(fp.returncode)}'
+except Exception as e:
+    fuzzy = f'err:{e}'
+
+# ── learn ──
+try:
+    p = subprocess.run(['/usr/bin/rspamc', '-h', '127.0.0.1:11334', f'learn_{CLASS}'],
+                       input=learn_body, capture_output=True, timeout=30)
+    out = (p.stdout + p.stderr).decode('utf-8', 'replace').replace('\n', ' ').strip()
+    done(f'bytes={len(learn_body)} saved={saved} fuzzy={fuzzy} rc={p.returncode} rspamc="{out[:200]}"',
+         learned=(p.returncode == 0))
+except Exception as e:
+    done(f'rspamc error: {e}')

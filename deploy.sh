@@ -338,6 +338,7 @@ apply_defaults() {
   if [ "$ENABLE_IPV6" = yes ]; then INET_PROTOCOLS=all; MYNETWORKS="127.0.0.0/8, [::1]/128"
   else INET_PROTOCOLS=ipv4; MYNETWORKS="127.0.0.0/8"; fi
   : "${ENABLE_SIEVE:=yes}"
+  : "${ENABLE_REPORT_ADDRESSES:=yes}"
   # Quotas: enforced at SMTP time (delivery is virtual_transport=virtual, which
   # bypasses Dovecot) via a Dovecot quota-status policy Postfix queries. The
   # userdb returns a per-mailbox quota_rule from the PostfixAdmin quota column.
@@ -466,7 +467,7 @@ export_config() {
     ENABLE_FEEDS ABUSECH_API_KEY ABUSEIPDB_API_KEY ENABLE_OTX_URI \
     ENABLE_BREACH_CHECK ILEXA_URL_PREFIX ILEXA_ADMIN_USER ILEXA_ADMIN_PASSWORD \
     QUARANTINE_FOLDERS ARCHIVE_USER TIMEZONE SITE_TITLE PHP_FPM_SOCK MYSQL_SOCK \
-    WEB_USER WEB_GROUP ENABLE_ARCHIVE ARCHIVE_RETENTION_DAYS ENABLE_SIEM_EXPORT
+    WEB_USER WEB_GROUP ENABLE_ARCHIVE ARCHIVE_RETENTION_DAYS ENABLE_SIEM_EXPORT ENABLE_REPORT_ADDRESSES
 }
 
 summary_text() {

@@ -245,11 +245,10 @@ server:
   collected their mail there is no server-side copy left — a message that was
   mis-filed can never be examined, recovered, or learned from. IMAP users who
   empty folders leave the same hole.
-- **Users do not reliably report spam.** Webmail's mark-as-junk buttons (and
-  report addresses, where an operator sets them up — this installer does not
-  create any) only work for people who bother to use them, so without an
-  archive the filter's training corpus is whatever a handful of users happened
-  to report.
+- **Users do not reliably report spam.** Webmail's mark-as-junk buttons and
+  the `spam@`/`ham@` report addresses (`ENABLE_REPORT_ADDRESSES`, see §13)
+  only work for people who bother to use them, so without an archive the
+  filter's training corpus is whatever a handful of users happened to report.
 - **There is no quarantine in this design.** Suspect mail is tagged and
   *delivered* — deliberately — so the archive is the only place a false
   positive can be retrieved from. That includes mail scored down for a
@@ -320,6 +319,7 @@ Any source whose key is left blank is skipped rather than failing the install.
 | `ENABLE_UNOFFICIAL_SIGS` | Third-party ClamAV signatures + YARA rules (`clamav-unofficial-sigs`); required by the console's signature/YARA panel. EL only | `yes` |
 | `ENABLE_SIEM_EXPORT` | Seed the rsyslog SIEM-forward config (Fail2Ban / Apache-SSL errors / console audit → local2-4). The console's Rendszer → SIEM card owns it afterwards; actual forwarding stays off until a collector is configured there | `no` |
 | `HU_CLASSIFY_REPORT_EMAIL` | Destination for the fortnightly `41-hu-classify` auto-review report | empty |
+| `ENABLE_REPORT_ADDRESSES` | spam@/ham@ report addresses in every mail domain — forward a mis-classified message as an attachment to train the filter (see §13) | `yes` |
 
 ### Hardening (secure-by-default)
 | Key | Meaning | Default |
@@ -436,6 +436,7 @@ so a missing value is caught immediately, not silently shipped.
 | `50-web` | Apache + PHP, security headers, PostfixAdmin, Roundcube + password plugin. |
 | `55-ilexa` | Deploys the ilexa console from the bundle built by `tools/bundle-ilexa.sh`; Apache alias + Basic auth, root helpers, sudoers, DB read-only user, map seeding, crons. Runs after `50-web` and `40-rspamd`. |
 | `57-archive` | Opt-in central mail archive (always-bcc into one admin-readable mailbox); off by default because of its legal/GDPR weight. |
+| `58-report-learn` | spam@/ham@ report addresses in every mail domain: dedicated `rspamreport` user, hardened python3 handler (attachment-extract → strip scanner headers → rspamd Bayes learn + local fuzzy add/del, spam copies saved to the reporter's Spam folder via a one-command sudoers rule), master.cf pipe services + transport routing + alias rows. Never clobbers an existing spam@/ham@. |
 | `60-firewalld` | Public zone, geoblock + OTX ipsets, drop rules (port 25 never dropped). |
 | `65-fail2ban` | sshd / postfix-sasl / dovecot / apache jails, 1 h ban + escalation. |
 | `66-siem-export` | Seeds the rsyslog SIEM-forward config once via `qa-siem-config.sh`; the console's Rendszer → SIEM card is the sole owner afterwards. Forwarding stays off until a collector is configured there. |
@@ -642,6 +643,7 @@ an existing one).
 | **fail2ban recidive** | (always on with fail2ban) | — | Week-long ban for IPs that repeatedly trip other jails. |
 | **Prometheus metrics** | `ENABLE_METRICS`, `METRICS_SCRAPE_CIDR` | off | `node_exporter` bound to localhost (scrape via SSH tunnel) or, if a scrape CIDR is given, bound to `0.0.0.0:9100` with a firewalld rule opening 9100 **only** to that CIDR. |
 | **Autoconfig / autodiscover** | `ENABLE_AUTOCONFIG` | on | Thunderbird autoconfig + Outlook autodiscover served from `autoconfig.<domain>` / `autodiscover.<domain>` (cert SANs added once the CNAMEs resolve — see §TLS) so mail clients self-configure. CNAMEs written to `mail-deploy-dns-extra.txt`. |
+| **Spam/ham report addresses** | `ENABLE_REPORT_ADDRESSES` | on | Module `58-report-learn`. Users forward a mis-classified message **as an attachment** to `spam@`/`ham@` of their own domain. The handler (dedicated no-login `rspamreport` user) checks the sender is an internal domain, rate-limits, extracts the `message/rfc822` original, strips scanner-added headers, then: Bayes `learn_spam`/`learn_ham`, local-fuzzy add (spam) or del (ham), and — spam only — saves a copy into the reporter's own Spam folder (visible in the console's quarantine view) through a sudoers rule allowing exactly `doveadm save -u <user> -m Spam`. Reports never bounce; every outcome is syslogged. This is the main training path for POP3 users, whose clients delete server-side mail. An existing `spam@`/`ham@` mailbox or alias in a domain is left untouched (warned, not overwritten). The allowed-sender list (`/etc/rspamd-report/domains.txt`) is regenerated from the answers file on every run — add new domains there, not by hand. |
 | **SIEM export** | `ENABLE_SIEM_EXPORT` | off | Module `66-siem-export` seeds the rsyslog forward config (Fail2Ban bans, Apache SSL-vhost errors i.e. console sign-in attempts, and the console's own audit trail → rsyslog local2-4). After install the console's **Rendszer → SIEM** card owns it entirely: collector host/port/protocol, optional TLS with a pasted CA certificate, and an automatic health check that alerts when forwarding wedges. Nothing leaves the server until a collector is configured there. |
 | **Language signals (experimental)** | `ENABLE_HU_CLASSIFY`, `HU_CLASSIFY_REPORT_EMAIL` | off | Module `41-hu-classify`. The report email receives a fortnightly auto-review of the signals' measured performance. See the honest status below before enabling. |
 
