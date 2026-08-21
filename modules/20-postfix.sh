@@ -104,7 +104,10 @@ write_sql_map mysql-email2email.cf \
 # is also PostfixAdmin's own model. NOTE it does not grant anything across
 # separate mailboxes -- an alias whose goto is itself (the common
 # PostfixAdmin-generated row) confers no extra rights, verified on the
-# reference host.
+# reference host. Do not "fix" that by adding a delegate to a real mailbox's
+# goto: goto is a delivery list, so that would forward the mailbox's incoming
+# mail too. Mailbox-to-mailbox send-as rights belong in
+# /etc/postfix/sender_login_exceptions (seeded below).
 write_sql_map mysql-sender-login-alias.cf \
   "SELECT goto FROM alias WHERE address='%s' AND active='1'"
 

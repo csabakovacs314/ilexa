@@ -194,11 +194,16 @@ resolve_dequoted_address = no
 #
 # Owners come from three maps: a mailbox owns its own address, an alias is
 # owned by its goto targets (so members of a shared role alias can use it),
-# and the exceptions file covers what neither can express -- a user allowed
-# to send as an address in a domain this server does not host at all (e.g. a
-# customer's scan-to-email device sending as their own external business
-# address). Edit the file, `postmap` it, done -- smtpd processes are
-# short-lived, so new connections pick up the rebuilt .db without a reload.
+# and the exceptions file covers what neither can express:
+#   - a sender in a domain this server does not host at all (e.g. a
+#     customer's scan-to-email device sending as its own external address);
+#   - send-as delegation between two REAL mailboxes. Do NOT grant that by
+#     adding the sender to the target's alias goto: goto is a DELIVERY list,
+#     so that would also forward the target's incoming mail to the delegate.
+#     Alias-goto ownership is only right for role aliases that exist to
+#     forward anyway.
+# Edit the file, `postmap` it, done -- smtpd processes are short-lived, so
+# new connections pick up the rebuilt .db without a reload.
 smtpd_sender_login_maps =
     hash:/etc/postfix/sender_login_exceptions
     proxy:mysql:/etc/postfix/sql/mysql-email2email.cf
