@@ -433,9 +433,9 @@ so a missing value is caught immediately, not silently shipped.
 | `05-base` | EPEL, PHP module stream (EL9 only — EL10 ships PHP unmodularized), `mtagroup`, swapfile if short, sysctl tuning, crypto-policy DEFAULT. |
 | `10-mariadb` | Install + localhost bind + 512 MB pool; creates `postfix`/`roundcube` DBs with generated passwords, plus the ungranted read-only `postfix_maps` user (grants come from `50-web` once the schema exists). |
 | `20-postfix` | Renders `main.cf`/`master.cf`; writes the 9 MySQL maps with the read-only `postfix_maps` user (column-scoped — cannot read `mailbox.password`); postscreen DNSBLs. |
-| `25-dovecot` | SQL auth, Maildir, TLS, gz storage; optional `last_login` and `fts_xapian` (built from source, only enabled if the `.so` verifies). |
+| `25-dovecot` | SQL auth, Maildir, TLS, gz storage, the LMTP delivery socket Postfix delivers through (sieve/quota/zlib run at delivery), quarantine-folder auto-create; optional `last_login` and `fts_xapian` (built from source on EL, packaged on Ubuntu; only enabled if the `.so` verifies). |
 | `26-sieve` | Sieve server-side filtering + ManageSieve on 4190 (dovecot-pigeonhole; Roundcube `managesieve` plugin wired in `50-web`). |
-| `27-quota` | PostfixAdmin per-mailbox quotas, enforced at SMTP time via Dovecot's `quota-status` policy (delivery bypasses LDA/LMTP, so RCPT-time rejection is the only enforcement point); IMAP QUOTA reporting on. |
+| `27-quota` | PostfixAdmin per-mailbox quotas: RCPT-time rejection via Dovecot's `quota-status` policy (refuse before accepting responsibility), enforced again at LMTP delivery; IMAP QUOTA reporting on. |
 | `30-auth` | OpenDKIM per-domain 2048-bit keys (+ DNS records), OpenDMARC, policyd-spf. |
 | `35-clamav` | Enables freshclam (auto-updating defs) + clamd, called through rspamd. |
 | `40-rspamd` | rspamd as the sole mail filter (`add_header 4 / rewrite_subject 6 / reject 15`); ClamAV wired in as `CLAM_VIRUS`; `_rspamd` added to `mtagroup` so it can reach the clamd socket. |
@@ -652,8 +652,8 @@ an existing one).
 |---------|-------------|---------|-------|
 | **MTA-STS / TLS-RPT / DANE** | `ENABLE_MTA_STS`, `MTA_STS_MODE`, `TLSRPT_RUA` | on / enforce | Publishes an MTA-STS policy on `mta-sts.<domain>` and generates every DNS record (policy TXT, TLS-RPT, `mta-sts` CNAME, and a DANE **TLSA `3 1 1`** for the MX) into `/root/mail-deploy-dns-extra.txt`. The cert requests `mta-sts.<domain>` as a SAN. |
 | **IPv6** | `ENABLE_IPV6` | off | `inet_protocols=all` + `[::1]/128` in mynetworks; reminds you to set AAAA + IPv6 PTR. Note: the geoblock/OTX ipsets are IPv4-only, so v6 traffic bypasses them. |
-| **Sieve + ManageSieve** | `ENABLE_SIEVE` | on | dovecot-pigeonhole, ManageSieve on **4190** (opened in firewalld), and the Roundcube `managesieve` plugin — users edit server-side filters from webmail. |
-| **Mailbox quotas** | `ENABLE_QUOTA` | on | Enforced at **SMTP time** (delivery is `virtual_transport=virtual`, which bypasses Dovecot): Postfix queries Dovecot's `quota-status` policy and rejects RCPT for over-quota mailboxes. Limits come from the PostfixAdmin `quota` column; IMAP QUOTA reporting is on. |
+| **Sieve + ManageSieve** | `ENABLE_SIEVE` | on | dovecot-pigeonhole, ManageSieve on **4190** (opened in firewalld), and the Roundcube `managesieve` plugin — users edit server-side filters from webmail, and they **execute at delivery** because delivery goes through Dovecot LMTP (with Postfix's own `virtual(8)` agent, sieve silently never ran — proven live and fixed 2026-08-21). |
+| **Mailbox quotas** | `ENABLE_QUOTA` | on | Enforced at **SMTP time** (Postfix queries Dovecot's `quota-status` policy and rejects RCPT for over-quota mailboxes — pre-queue beats bouncing) and again at LMTP delivery. Limits come from the PostfixAdmin `quota` column; IMAP QUOTA reporting is on. |
 | **fail2ban recidive** | (always on with fail2ban) | — | Week-long ban for IPs that repeatedly trip other jails. |
 | **Prometheus metrics** | `ENABLE_METRICS`, `METRICS_SCRAPE_CIDR` | off | `node_exporter` bound to localhost (scrape via SSH tunnel) or, if a scrape CIDR is given, bound to `0.0.0.0:9100` with a firewalld rule opening 9100 **only** to that CIDR. |
 | **Autoconfig / autodiscover** | `ENABLE_AUTOCONFIG` | on | Thunderbird autoconfig + Outlook autodiscover served from `autoconfig.<domain>` / `autodiscover.<domain>` (cert SANs added once the CNAMEs resolve — see §TLS) so mail clients self-configure. CNAMEs written to `mail-deploy-dns-extra.txt`. |

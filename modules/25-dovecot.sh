@@ -171,7 +171,7 @@ GLOBAL_PLUGINS="zlib"
 
 {
   echo "# mail-deploy consolidated overrides"
-  echo "protocols = imap pop3"
+  echo "protocols = imap pop3 lmtp"
   echo "mail_location = maildir:$MAIL_STORE/%d/%u"
   echo "mail_home = $MAIL_STORE/%d/%u"
   # The userdb hands out $MAIL_UID for every virtual mailbox, and Dovecot
@@ -183,6 +183,13 @@ GLOBAL_PLUGINS="zlib"
   # hand years ago; a fresh install never was.
   echo "first_valid_uid = $MAIL_UID"
   echo "first_valid_gid = $MAIL_GID"
+  echo "service lmtp {"
+  echo "  unix_listener /var/spool/postfix/private/dovecot-lmtp {"
+  echo "    mode = 0600"
+  echo "    user = postfix"
+  echo "    group = postfix"
+  echo "  }"
+  echo "}"
   echo "service auth {"
   echo "  unix_listener /var/spool/postfix/private/auth {"
   echo "    mode = 0666"

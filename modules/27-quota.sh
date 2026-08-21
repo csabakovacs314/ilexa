@@ -1,8 +1,11 @@
 #!/usr/bin/env bash
-# 27-quota — enforce PostfixAdmin per-mailbox quotas. Because delivery is
-# virtual_transport=virtual (bypasses Dovecot LDA/LMTP), enforcement is at SMTP
-# time: Postfix queries Dovecot's quota-status policy (wired in 20-postfix via
-# QUOTA_POLICY) which rejects RCPT for over-quota mailboxes. IMAP QUOTA reporting
+# 27-quota — enforce PostfixAdmin per-mailbox quotas. Primary enforcement is
+# at SMTP time: Postfix queries Dovecot's quota-status policy (wired in
+# 20-postfix via QUOTA_POLICY) which rejects RCPT for over-quota mailboxes --
+# rejecting pre-queue beats bouncing post-queue. Delivery itself now goes via
+# Dovecot LMTP (see main.cf.tmpl virtual_transport), which enforces quota a
+# second time at write; the RCPT-time policy stays because it is the one that
+# refuses mail before this server has accepted responsibility for it. IMAP QUOTA reporting
 # is enabled too. The per-mailbox limit comes from the userdb quota_rule
 # (QUOTA_FIELD, set in 25-dovecot).
 source "$MD_ROOT/lib/common.sh"

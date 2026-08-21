@@ -139,7 +139,14 @@ virtual_mailbox_maps =
 virtual_gid_maps = static:@@MAIL_GID@@
 virtual_mailbox_base = @@MAIL_STORE@@
 virtual_minimum_uid = @@MAIL_UID@@
-virtual_transport = virtual
+# Delivery goes THROUGH Dovecot (LMTP socket), not Postfix's own virtual(8)
+# agent. virtual(8) writes the Maildir directly, which silently bypasses
+# every Dovecot delivery feature -- most visibly Sieve: users edited filters
+# in Roundcube (managesieve) that never executed, proven live on the 24.04
+# box (fileinto rule ignored, mail in INBOX) and true of the reference host
+# too. LMTP runs sieve, honours quota at delivery, and stores compressed
+# (zlib) like the rest of the stack expects.
+virtual_transport = lmtp:unix:private/dovecot-lmtp
 virtual_uid_maps = static:@@MAIL_UID@@
 
 local_recipient_maps = $virtual_mailbox_maps
