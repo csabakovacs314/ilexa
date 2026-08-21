@@ -409,6 +409,19 @@ write_file /etc/logrotate.d/rsyslog-siem-stats 0644 root:root <<EOF
 }
 EOF
 
+# ---- GeoIP country lookups (archive/audit flags, sender_cc) ----------------
+# mmdblookup binary: EL ships it in libmaxminddb, Debian/Ubuntu in mmdb-bin.
+# The database itself comes from qa-geoipdb-refresh.sh (db-ip lite, keyless,
+# fresh monthly -- EL's geolite2-country package is a frozen 2019 snapshot
+# and Ubuntu packages no GeoLite2 mmdb at all). Without this stack every
+# sender-country flag silently never renders and sender_cc stays NULL.
+if [ "$PKG_MGR" = apt ]; then pkg_install mmdb-bin; else pkg_install libmaxminddb; fi
+if [ "$DRY_RUN" != 1 ] && [ ! -e /usr/share/GeoIP/GeoLite2-Country.mmdb ]; then
+  /usr/local/sbin/qa-geoipdb-refresh.sh \
+    && log_info "GeoIP country database installed (db-ip lite)" \
+    || log_warn "GeoIP database fetch failed — country flags stay empty until the monthly cron succeeds"
+fi
+
 {
   echo "# ilexa scheduled jobs."
   echo "SHELL=/bin/bash"
@@ -422,6 +435,9 @@ EOF
     echo "0 2 * * * root /usr/local/sbin/check-breaches.py >> /var/log/check-breaches.log 2>&1"
   echo "QA_DIGEST_TO=${ADMIN_EMAIL}"
   echo "0 7 * * 1 root /usr/local/sbin/qa-weekly-digest.php >> /var/log/qa-digest.log 2>&1"
+  # GeoIP country DB (db-ip lite, monthly re-publish): feeds the archive/audit
+  # country flags and archive_index.sender_cc. Day 2, after db-ip publishes.
+  echo "20 3 2 * * root SOFT_FAIL_RC=75 /usr/bin/cron-alert.sh geoipdb /usr/local/sbin/qa-geoipdb-refresh.sh >> /var/log/qa-geoipdb.log 2>&1"
 } > /tmp/ilexa.cron.$$
 write_file /etc/cron.d/ilexa 0644 root:root < /tmp/ilexa.cron.$$
 rm -f /tmp/ilexa.cron.$$
