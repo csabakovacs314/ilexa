@@ -391,12 +391,24 @@ pkg_lock_wait() {
   _pkg_lock_holders() {
     holders=""
     if command -v apt-get >/dev/null 2>&1; then
+      # apt-daily/apt-daily-upgrade are oneshot: "active" genuinely means a
+      # run is in progress. unattended-upgrades.service is deliberately NOT
+      # in this list: on Ubuntu it is the permanently-running shutdown-hook
+      # daemon (unattended-upgrade-shutdown --wait-for-signal), active for
+      # the whole boot -- treating it as a holder made this wait sit out its
+      # full cap on EVERY Ubuntu box while the dpkg lock was demonstrably
+      # free (caught live on the 24.04 redeploy, its first day in service).
       local u
-      for u in apt-daily.service apt-daily-upgrade.service unattended-upgrades.service; do
+      for u in apt-daily.service apt-daily-upgrade.service; do
         systemctl is-active --quiet "$u" 2>/dev/null && holders="$holders$u "
       done
       pgrep -x 'apt|apt-get|aptd|dpkg' >/dev/null 2>&1 && holders="${holders}apt/dpkg "
-      pgrep -f 'unattended-upgrade'    >/dev/null 2>&1 && holders="${holders}unattended-upgrade "
+      # Boundary after the name: matches the actual runner
+      # (.../unattended-upgrades/unattended-upgrade, plus flags) but not the
+      # -shutdown daemon, and not unrelated command lines mentioning the
+      # string (the naive -f pattern even matched an ssh session inspecting
+      # this very problem).
+      pgrep -f '/unattended-upgrade( |$)' >/dev/null 2>&1 && holders="${holders}unattended-upgrade "
       # fuser is authoritative when present (psmisc is not guaranteed on
       # minimal images, hence the process checks above stand on their own).
       if command -v fuser >/dev/null 2>&1 && [ -e /var/lib/dpkg/lock-frontend ]; then
