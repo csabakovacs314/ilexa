@@ -122,9 +122,23 @@ echo "archive-indexer: indexed $count new message(s) (prev max uid=$last)\n";
 // "Received-SPF:" does not false-match -- the colon must follow "Received"
 // immediately.
 function topmost_received_ip(string $rawHdrs): string {
-    foreach (explode("\n", $rawHdrs) as $line) {
-        if (stripos($line, 'Received:') !== 0) continue;
-        $line1 = ltrim(rtrim(substr($line, 9), " \t\r"));
+    $lines = explode("\n", $rawHdrs);
+    $skippedLmtp = false;
+    for ($i = 0, $n = count($lines); $i < $n; $i++) {
+        if (stripos($lines[$i], 'Received:') !== 0) continue;
+        $line1 = ltrim(rtrim(substr($lines[$i], 9), " \t\r"));
+        // Since the LMTP delivery switch (2026-08-21) our own Dovecot
+        // prepends ONE more Received above smtpd's record: "from <our-host>"
+        // with no bracketed IP, continuation "by <host> with LMTP". Both
+        // identifying features are required, and at most one header is ever
+        // skipped; smtpd's record (the next Received:) is then evaluated
+        // under the unchanged strict rule. Twin of the same skip in the
+        // console's qa_topmost_received_client_ip() -- keep them identical.
+        if (!$skippedLmtp && preg_match('/^from \S+$/i', $line1)
+            && isset($lines[$i + 1]) && stripos($lines[$i + 1], 'with LMTP') !== false) {
+            $skippedLmtp = true;
+            continue;
+        }
         if (strlen($line1) > 600) return '';
         if (!preg_match('/^\s*from .*\[(?:IPv6:)?([0-9a-fA-F:.]+)\]\)$/i', $line1, $m)) return '';
         return is_public_ip($m[1]) ? $m[1] : '';
