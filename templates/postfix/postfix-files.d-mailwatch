@@ -1,9 +1,0 @@
-# MailWatch queue display: allow apache (member of mtagroup) to list the
-# hold/incoming queues so the "Postfix Mail Queue" page can count messages.
-# These entries OVERRIDE the base postfix-files defaults (700 $mail_owner:-)
-# because postfix-files.d/* is processed AFTER postfix-files by post-install,
-# so "postfix set-permissions" (run on start/reload/package upgrade) keeps
-# these perms instead of resetting them to 700 postfix:root.
-# Format: name:type:owner:group:permission:flags  (path MUST stay $-prefixed)
-$queue_directory/hold:d:$mail_owner:mtagroup:750:uc
-$queue_directory/incoming:d:$mail_owner:mtagroup:750:uc

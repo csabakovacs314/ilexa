@@ -104,7 +104,6 @@ write_sql_map mysql-sender-login-alias.cf \
   "SELECT goto FROM alias WHERE address='%s' AND active='1'"
 
 # --- static support files ---
-install -d /etc/postfix/postfix-files.d
 # header_checks is seeded once, then belongs to the operator -- the template
 # itself invites per-site rules ("Add per-site rules below if you need them"),
 # and this used to cp over it unconditionally with no backup(), unlike the
