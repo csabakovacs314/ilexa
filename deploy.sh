@@ -210,9 +210,16 @@ collect_interactive() {
 
   # Opt-in, and the operator sees what it means first. This copies the content
   # of everyone's mail into one admin-readable mailbox.
-  if tui_yesno "DEPLOYMENT TYPE: with or without the central mail archive?
-
-WITH ARCHIVE (Postfix always_bcc copies every message to one mailbox)
+  #
+  # Explainer and choice are SEPARATE dialogs on purpose: as one ~34-line
+  # yesno this overflowed tui_yesno's fixed 10x74 box, whiptail rendered it
+  # as a scrolled region, and the initially focused control was the scroll
+  # area rather than a button -- reported from a live install as "the
+  # selector should be on OK by default". A msgbox has only an OK button
+  # (focused by definition), and the yesno that follows is short enough
+  # that its Yes/No buttons render normally.
+  tui_msg "DEPLOYMENT TYPE: the central mail archive" \
+"WITH ARCHIVE (Postfix always_bcc copies every message to one mailbox)
 WITHOUT ARCHIVE (filtering only; nothing is retained centrally)
 
 WHY THE ARCHIVE EXISTS -- it is not 'keep everything just in case':
@@ -240,9 +247,10 @@ In most jurisdictions that is personal-data processing which needs a lawful
 basis, a retention period and users informed in advance. Retention is asked
 for next and enforced automatically. The console additionally has a
 content-viewing policy (Rendszer -> adatvedelem) which can restrict or forbid
-reading message bodies even for administrators; it defaults to DENY.
+reading message bodies even for administrators; it defaults to DENY."
+  if tui_yesno "Enable the central mail archive?
 
-Enable the archive?"; then
+(The previous screen explains what this means, including the GDPR side.)"; then
     ENABLE_ARCHIVE=yes
     ARCHIVE_RETENTION_DAYS=$(tui_input "Keep archived mail for how many days?" "30") || md_abort
   else ENABLE_ARCHIVE=no; fi
@@ -535,6 +543,13 @@ main() {
   esac
   MD_OS_LABEL="${os_pretty} ${OS_VERSION}"
   MD_TUI_BACKTITLE="mail-deploy — ${MD_OS_LABEL} mail-server deployer  (Exit: Ctrl+X)"
+
+  # A fresh cloud image runs its first unattended update within minutes of
+  # boot; ensure_tui's whiptail install (the first package touch, inside
+  # collect_interactive below) would then sit silently on the dpkg lock and
+  # look hung. Drain visibly before any UI or package work. See
+  # pkg_lock_wait() in lib/common.sh.
+  pkg_lock_wait
   if [ -n "$ANSWERS" ]; then
     load_answers
     preflight_host                            # hard-fail root/OS, warn RAM/ports/repos

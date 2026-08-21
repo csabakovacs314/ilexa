@@ -70,7 +70,19 @@ BANNER
 }
 
 tui_msg() { # title text
-  if _tui_ok; then whiptail --backtitle "$MD_TUI_BACKTITLE" --title "$1" --msgbox "$2" 12 74
+  if _tui_ok; then
+    # Size the box to the text instead of clipping at a fixed 12 rows: long
+    # explainers (the deployment-type screen is ~34 lines) otherwise render
+    # scroll-mangled. Cap at the real terminal height; past the cap, add
+    # --scrolltext — a msgbox has only the OK button, so focus stays on OK
+    # either way and arrow keys scroll the text.
+    local lines maxh h scroll=()
+    lines=$(printf '%s\n' "$2" | wc -l)
+    maxh=$(tput lines 2>/dev/null || echo 24); maxh=$((maxh - 2))
+    h=$((lines + 6))
+    if [ "$h" -gt "$maxh" ]; then h=$maxh; scroll=(--scrolltext); fi
+    [ "$h" -lt 12 ] && h=12
+    whiptail --backtitle "$MD_TUI_BACKTITLE" --title "$1" "${scroll[@]}" --msgbox "$2" "$h" 74
   else printf '%s: %s\n' "$1" "$2" >&2; fi
 }
 

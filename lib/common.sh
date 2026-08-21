@@ -371,6 +371,64 @@ pkg_install() { # pkg...  -> aborts the run on failure
   pkg_try "$@" || die "$PKG_MGR install failed: $*"
 }
 
+# Wait for a package manager ALREADY RUNNING on the host before we touch it.
+# A freshly booted cloud image starts unattended updates within minutes of
+# first boot (Ubuntu: apt-daily/apt-daily-upgrade -> unattended-upgrade;
+# EL: dnf-makecache, sometimes PackageKit), and a first-boot run with a
+# kernel in it can hold the dpkg lock well past the 10-minute
+# DPkg::Lock::Timeout every apt call here carries. That timeout also waits
+# SILENTLY, so to an operator the installer simply looks hung -- which is
+# exactly how this function came to exist. This wait is chatty on purpose:
+# it names what holds the lock and counts the time, so "waiting for the
+# distro's own updater" never looks like "wedged".
+#
+# Detection is deliberately process/lock based, not unit-name based alone:
+# unattended-upgrade is a python script (comm shows python3), and the unit
+# is often inactive while the triggered child still holds the lock.
+# PKG_LOCK_WAIT_MAX (seconds, default 1800) caps the wait.
+pkg_lock_wait() {
+  local max="${PKG_LOCK_WAIT_MAX:-1800}" interval=15 waited=0 holders
+  _pkg_lock_holders() {
+    holders=""
+    if command -v apt-get >/dev/null 2>&1; then
+      local u
+      for u in apt-daily.service apt-daily-upgrade.service unattended-upgrades.service; do
+        systemctl is-active --quiet "$u" 2>/dev/null && holders="$holders$u "
+      done
+      pgrep -x 'apt|apt-get|aptd|dpkg' >/dev/null 2>&1 && holders="${holders}apt/dpkg "
+      pgrep -f 'unattended-upgrade'    >/dev/null 2>&1 && holders="${holders}unattended-upgrade "
+      # fuser is authoritative when present (psmisc is not guaranteed on
+      # minimal images, hence the process checks above stand on their own).
+      if command -v fuser >/dev/null 2>&1 && [ -e /var/lib/dpkg/lock-frontend ]; then
+        fuser /var/lib/dpkg/lock-frontend >/dev/null 2>&1 && holders="${holders}dpkg-lock "
+      fi
+    else
+      pgrep -x 'dnf|yum|packagekitd' >/dev/null 2>&1 && holders="${holders}dnf/yum "
+      if command -v fuser >/dev/null 2>&1 && [ -e /var/lib/rpm/.rpm.lock ]; then
+        fuser /var/lib/rpm/.rpm.lock >/dev/null 2>&1 && holders="${holders}rpm-lock "
+      fi
+    fi
+    [ -n "$holders" ]
+  }
+  _pkg_lock_holders || return 0
+  if [ "${DRY_RUN:-0}" = 1 ]; then
+    log_warn "package manager busy (${holders% }) — a real run would wait here (up to ${max}s)"
+    return 0
+  fi
+  log_info "system updates in progress (${holders% }) — waiting for them to finish before installing anything (cap ${max}s, override with PKG_LOCK_WAIT_MAX=)"
+  while _pkg_lock_holders; do
+    if [ "$waited" -ge "$max" ]; then
+      local hint="systemctl stop dnf-makecache.service; pkill -x dnf"
+      command -v apt-get >/dev/null 2>&1 \
+        && hint="systemctl stop apt-daily.service apt-daily-upgrade.service unattended-upgrades.service"
+      die "package manager still busy after ${max}s (${holders% }) — let the distro's updater finish, or stop it ('$hint') and re-run"
+    fi
+    sleep "$interval"; waited=$((waited + interval))
+    log_info "  still waiting on: ${holders% } (${waited}s elapsed)"
+  done
+  log_info "package manager free after ${waited}s — continuing"
+}
+
 svc_try() { # unit...  -> 0/1, never aborts
   if [ "$DRY_RUN" = 1 ]; then log_info "[dry-run] systemctl enable --now $*"; return 0; fi
   systemctl enable --now "$@" && return 0

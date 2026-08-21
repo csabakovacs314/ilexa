@@ -379,7 +379,14 @@ owning module rewrites them.
 
 ### Execution flow (`deploy.sh`)
 1. **parse args** → interactive vs `--answers`, dry-run, module filter.
-2. **welcome screen** (interactive) → purpose + Ctrl+X exit.
+2. **drain in-progress system updates** — a freshly booted image starts its
+   own unattended update within minutes (Ubuntu: apt-daily/unattended-upgrade;
+   EL: dnf-makecache) and holds the package lock; the installer waits for it
+   *visibly*, naming the holder and counting elapsed time (cap 30 min,
+   `PKG_LOCK_WAIT_MAX=` to override) instead of silently sitting on the lock
+   and looking hung. Every later apt call additionally carries
+   `DPkg::Lock::Timeout` in case an updater re-triggers mid-run.
+3. **welcome screen** (interactive) → purpose + Ctrl+X exit.
 3. **collect answers** → whiptail wizard *or* source the answer file.
 4. **apply defaults + derive values** → e.g. TLS cert paths from `TLS_MODE`,
    the postscreen DNSBL list (adds `otx.rbl*2` only if OTX is on),
@@ -590,6 +597,10 @@ of the same facts.
 - **"unsupported OS … supported: RHEL/AlmaLinux/Rocky 9 or 10, Ubuntu
   22.04/24.04/26.04 LTS"** — you're not on a supported OS/version (EL8 and
   Debian-proper profiles are not written).
+- **"system updates in progress … waiting"** — normal on a freshly booted
+  image: the distro's own first-boot update run holds the package lock, and
+  the installer waits for it rather than corrupting it. If it exceeds the cap
+  the message names the exact `systemctl stop …` command to reclaim the lock.
 - **A module failed** — read `/var/log/ilexa-install.log`, fix the cause, then
   re-run `sudo ./deploy.sh --only <module> --answers answers.conf`. Completed
   modules skip themselves; to force a redo, delete
