@@ -245,9 +245,11 @@ server:
   collected their mail there is no server-side copy left — a message that was
   mis-filed can never be examined, recovered, or learned from. IMAP users who
   empty folders leave the same hole.
-- **Users do not reliably report spam.** The `spam@` / `ham@` report addresses
-  only work for people who bother to forward things, so without an archive the
-  filter's training corpus is whatever a handful of users happened to send.
+- **Users do not reliably report spam.** Webmail's mark-as-junk buttons (and
+  report addresses, where an operator sets them up — this installer does not
+  create any) only work for people who bother to use them, so without an
+  archive the filter's training corpus is whatever a handful of users happened
+  to report.
 - **There is no quarantine in this design.** Suspect mail is tagged and
   *delivered* — deliberately — so the archive is the only place a false
   positive can be retrieved from. That includes mail scored down for a
@@ -386,7 +388,7 @@ owning module rewrites them.
    key-only is requested without a key.
 6. **export config** → all answers exported so module subprocesses inherit them.
 7. **review screen** (interactive) → confirm, or abort with no changes.
-8. **preflight gate** → root + a supported EL version (9 or 10).
+8. **preflight gate** → root + a supported OS (EL 9/10 or Ubuntu 22.04/24.04/26.04 LTS).
 9. **run modules** → each `modules/NN-*.sh` executed **as a subprocess** in
    numeric order. A module failure stops the run.
 
@@ -531,8 +533,10 @@ PTR   <public IP> ->  mail.<domain>   (at your hosting provider)
 Then:
 1. Create a domain + mailbox in **PostfixAdmin** (`https://<fqdn>/postfixadmin`).
 2. Log in to **Roundcube** (`https://<fqdn>/roundcube`) as that mailbox.
-3. Send a test message in and confirm it lands in the Maildir and shows a
-   `BAYES_*` verdict; change the password in Roundcube and confirm it still logs in.
+3. Send a test message in and confirm it lands in the Maildir and carries an
+   `X-Spamd-Result` header (proof the milter scanned it — `BAYES_*` symbols
+   only appear once Bayes has been trained past its minimum); change the
+   password in Roundcube and confirm it still logs in.
 4. Verify SPF/DKIM/DMARC with an external checker (e.g. mail-tester.com).
 
 ---
@@ -543,10 +547,16 @@ The toolkit ships **static-verified**: `shellcheck` clean; every template render
 with zero leftover placeholders and passes its native linter (`postconf`,
 `php -l`); a full `--dry-run` runs all modules with no errors.
 
-**Full end-to-end acceptance must run on a throwaway EL9 or EL10 VM** (never an
-existing mail server) — `cd ci && vagrant up` (or `CI_BOX=almalinux/10 vagrant up`)
-deploys with `ci/answers.ci.conf` and runs `ci/run-acceptance.sh`. In the VM,
-assert end to end:
+**Full end-to-end acceptance must run on a throwaway VM or disposable host**
+(never an existing mail server). Two runners exist:
+
+- `ci/run-remote-acceptance.sh <user@host>` — copies the tree to a disposable
+  remote box, deploys with an answers file and runs `ci/run-acceptance.sh`
+  there. This is the path that has actually been exercised.
+- `cd ci && vagrant up` (or `CI_BOX=almalinux/10 vagrant up`) — the local-VM
+  variant, for hosts with a hypervisor.
+
+The acceptance run asserts, end to end:
 
 1. `postfix check`, `doveconf -n`, `rspamadm configtest`, and `postmap -q
    <primary-domain>` (queried against the rendered virtual-domains map) all pass.
@@ -564,16 +574,21 @@ assert end to end:
 8. `DRY_RUN=1 /usr/local/sbin/load-otx.sh` builds a non-trivial ipset; `dig
    2.0.0.127.otx.rbl @127.0.0.1 -p 530` answers `127.0.0.2` (rbldnsd live).
 
-None of this has run yet — the deployer has been exercised via `shellcheck` and
-`--dry-run` only, never on a live VM. Treat it as unverified until step 7 passes
-on a throwaway host.
+How far each OS has actually been through this: **Ubuntu 24.04** has completed
+the full remote acceptance run on a real disposable host (every module executed,
+real mail sent and scanned); **EL9** is verified against a live production
+deployment; **EL10** is repoquery-verified (real AlmaLinux 10 repo metadata)
+but has never executed end-to-end; **Ubuntu 22.04/26.04** share the 24.04 code
+path and are extrapolated. The README's verification-tier table is the summary
+of the same facts.
 
 ---
 
 ## 11. Troubleshooting
 
-- **"unsupported OS … supported: RHEL/AlmaLinux/Rocky 9 or 10"** — you're not on
-  a supported AlmaLinux/Rocky major version.
+- **"unsupported OS … supported: RHEL/AlmaLinux/Rocky 9 or 10, Ubuntu
+  22.04/24.04/26.04 LTS"** — you're not on a supported OS/version (EL8 and
+  Debian-proper profiles are not written).
 - **A module failed** — read `/var/log/ilexa-install.log`, fix the cause, then
   re-run `sudo ./deploy.sh --only <module> --answers answers.conf`. Completed
   modules skip themselves; to force a redo, delete
@@ -602,7 +617,10 @@ on a throwaway host.
 - **A repo-external secret checker** (`/root/mail-deploy-secretcheck.sh`, kept
   outside the repo on purpose) scans the working tree for live domains, IPs, the
   OTX key, and any DB password harvested from the live config, and must report
-  CLEAN before every commit.
+  CLEAN before every commit. Public releases add a second gate:
+  `tools/export-public.sh` builds the published tree and deletes its own output
+  if any audited pattern (key shapes, private-key blocks, internal material)
+  appears in the result.
 - **Least privilege:** MariaDB binds to localhost only; each app has its own DB
   user scoped to its own database; Webmin can be source-IP allowlisted; port 25 is
   open to the world (it must be) but everything else can be geo/OTX-dropped.
