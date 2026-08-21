@@ -127,6 +127,41 @@ ensure_tui() {
     || die "installed $tui_pkg but whiptail is still not on PATH — use --answers instead"
 }
 
+# One screenful of host facts, shown BEFORE anything is asked or installed:
+# the operator confirms they are on the box they think they are on (fresh
+# cloud images all look alike, and this tool overwrites /etc/postfix and the
+# databases -- running it on the wrong host is the worst mistake it enables).
+# Interactive: a msgbox (OK-focused). --answers mode: the same block as log
+# lines, so unattended runs record what the host looked like at t=0.
+show_sysinfo() {
+  local virt mem swap disk cpu ip host
+  virt=$(systemd-detect-virt 2>/dev/null || echo unknown)
+  cpu=$(nproc 2>/dev/null || echo '?')
+  mem=$(awk '/MemTotal/{printf "%.1f GB", $2/1048576}' /proc/meminfo 2>/dev/null)
+  swap=$(awk '/SwapTotal/{printf "%.1f GB", $2/1048576}' /proc/meminfo 2>/dev/null)
+  disk=$(df -h / 2>/dev/null | awk 'NR==2{print $4 " free of " $2 " on /"}')
+  ip=$(ip -4 -o addr show scope global 2>/dev/null | awk '{print $4}' | paste -sd' ' -)
+  host=$(hostname -f 2>/dev/null || hostname)
+  local info="OS:        ${MD_OS_LABEL:-unknown}
+Kernel:    $(uname -r)  ($(uname -m))
+Virt:      ${virt}
+CPU:       ${cpu} vCPU
+Memory:    ${mem:-?}   Swap: ${swap:-?}
+Disk:      ${disk:-?}
+Hostname:  ${host}
+IPv4:      ${ip:-none}
+
+This tool will OVERWRITE /etc/postfix, /etc/dovecot, firewalld zones and
+the MariaDB databases on THIS host. Continue only if this is the fresh
+box you intend to turn into a mail server."
+  if [ -n "$ANSWERS" ] || ! _tui_ok; then
+    log_info "host at start of run:"
+    while IFS= read -r _l; do log_info "  $_l"; done <<<"$info"
+  else
+    tui_msg "HOST CHECK — is this the right machine?" "$info"
+  fi
+}
+
 collect_interactive() {
   ensure_tui
   # Choosing "Exit"/Esc on any prompt aborts cleanly (md_abort), no changes.
@@ -553,6 +588,7 @@ main() {
   if [ -n "$ANSWERS" ]; then
     load_answers
     preflight_host                            # hard-fail root/OS, warn RAM/ports/repos
+    show_sysinfo                              # record what the host looked like at t=0
   else
     tui_welcome "$MD_PURPOSE"                 # start screen + Ctrl+X exit
     # preflight_host runs here, not before tui_welcome: tui_welcome clears the
@@ -560,6 +596,7 @@ main() {
     # still lands before collect_interactive, so a refused host dies before
     # the wizard's ~20 prompts rather than after.
     preflight_host                            # hard-fail root/OS, warn RAM/ports/repos
+    show_sysinfo                              # host-facts screen: right box? (OK to continue)
     collect_interactive
   fi
   apply_defaults

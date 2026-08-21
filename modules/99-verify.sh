@@ -99,6 +99,22 @@ fi
 spf="v=spf1 a mx ~all"
 tls_note="$TLS_MODE"
 [ -e "$MD_STATE_DIR/tls-selfsigned.flag" ] && tls_note="SELF-SIGNED (Let's Encrypt did not issue — clients will see cert warnings; fix DNS/port 80 and re-run --only 75)"
+
+# The web addresses belong IN the credentials file: the operator reads that
+# one file after the install (it holds the logins), and a login without its
+# URL sends them back to scrollback-diving. Guarded so a --only re-run of
+# this module doesn't append the block twice.
+if [ "$DRY_RUN" != 1 ] && [ -e "$MD_CRED_FILE" ] \
+   && ! grep -q "^web addresses" "$MD_CRED_FILE" 2>/dev/null; then
+  {
+    echo ""
+    echo "web addresses"
+    [ "${ENABLE_ILEXA:-yes}" = yes ] \
+      && printf '%-32s %s\n' "  ilexa console" "https://${MAIL_FQDN}${ILEXA_URL_PREFIX:-/ilexa/}"
+    printf '%-32s %s\n' "  Roundcube webmail" "https://${MAIL_FQDN}/roundcube/"
+    printf '%-32s %s\n' "  PostfixAdmin" "https://${MAIL_FQDN}/postfixadmin/"
+  } >> "$MD_CRED_FILE"
+fi
 cat <<EOF
 
 ============================================================
