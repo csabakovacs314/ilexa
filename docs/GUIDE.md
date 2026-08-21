@@ -229,6 +229,7 @@ ClamAV hits (`CLAM_VIRUS`) are rejected outright regardless of score.
 | `ILEXA_ADMIN_USER` | First console admin (Basic auth) | `admin` |
 | `ILEXA_ADMIN_PASSWORD` | Console admin password (blank ⇒ auto-generated) | auto |
 | `ILEXA_URL_PREFIX` | Apache `Alias` + cookie path | `/ilexa/` |
+| `ILEXA_LANG` | Console UI language (`en`/`hu`), seeded once; the console's Admin → language owns it afterwards | `en` |
 | `QUARANTINE_FOLDERS` | Dovecot folders the console treats as quarantine | `Junk Quarantine Spam` |
 
 ### Mail archive (opt-in) — the deployment-type choice

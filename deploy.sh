@@ -289,6 +289,14 @@ reading message bodies even for administrators; it defaults to DENY."
     ENABLE_ARCHIVE=yes
     ARCHIVE_RETENTION_DAYS=$(tui_input "Keep archived mail for how many days?" "30") || md_abort
   else ENABLE_ARCHIVE=no; fi
+  # Console UI language. English default; Yes is whiptail's default button,
+  # so plain Enter accepts English. Changeable any time from the console
+  # (Admin -> language), which owns the state file after the install.
+  if tui_yesno "ilexa console language: use ENGLISH as the interface language?
+
+(No = Hungarian / magyar. Changeable later in the console: Admin -> language.)"; then
+    ILEXA_LANG=en
+  else ILEXA_LANG=hu; fi
   local extras extra_args=()
   extra_args=(last_login "Dovecot last-login tracking" on \
               fts_xapian "Full-text search (compiled; RAM-heavy)" on \
@@ -353,6 +361,7 @@ apply_defaults() {
   : "${ENABLE_ARCHIVE:=no}"
   : "${ARCHIVE_RETENTION_DAYS:=30}"
   : "${ILEXA_URL_PREFIX:=/ilexa/}"
+  : "${ILEXA_LANG:=en}"
   : "${ILEXA_ADMIN_USER:=admin}"
   : "${ILEXA_ADMIN_PASSWORD:=}"        # blank = generated and recorded
   : "${QUARANTINE_FOLDERS:=Junk Quarantine Spam}"
@@ -508,7 +517,7 @@ export_config() {
     RSPAMD_CTRL RSPAMD_MILTER CLAMD_SOCKET MTA_GROUP \
     ENABLE_ILEXA ILEXA_LIST_DIR ENABLE_HU_CLASSIFY HU_CLASSIFY_REPORT_EMAIL ENABLE_UNOFFICIAL_SIGS \
     ENABLE_FEEDS ABUSECH_API_KEY ABUSEIPDB_API_KEY ENABLE_OTX_URI \
-    ENABLE_BREACH_CHECK ILEXA_URL_PREFIX ILEXA_ADMIN_USER ILEXA_ADMIN_PASSWORD \
+    ENABLE_BREACH_CHECK ILEXA_URL_PREFIX ILEXA_ADMIN_USER ILEXA_ADMIN_PASSWORD ILEXA_LANG \
     QUARANTINE_FOLDERS ARCHIVE_USER TIMEZONE SITE_TITLE PHP_FPM_SOCK MYSQL_SOCK \
     WEB_USER WEB_GROUP ENABLE_ARCHIVE ARCHIVE_RETENTION_DAYS ENABLE_SIEM_EXPORT ENABLE_REPORT_ADDRESSES
 }
@@ -524,7 +533,7 @@ TLS mode:        $TLS_MODE
 Spam tag/reject:  ${SPAM_ADD_HEADER:-4} / ${SPAM_REJECT:-15}
 Mail archive:    ${ENABLE_ARCHIVE:-no}${ENABLE_ARCHIVE:+ (${ARCHIVE_RETENTION_DAYS:-30} days)}
 Feeds:           ${ENABLE_FEEDS:-no}
-ilexa console:   ${ENABLE_ILEXA:-yes} at ${ILEXA_URL_PREFIX:-/ilexa/}
+ilexa console:   ${ENABLE_ILEXA:-yes} at ${ILEXA_URL_PREFIX:-/ilexa/} (language: ${ILEXA_LANG:-en})
 Geoblock:        $GEOBLOCK_COUNTRIES
 OTX suite:       $ENABLE_OTX
 Spamhaus DQS:    $([ -n "${SPAMHAUS_DQS_KEY:-}" ] && echo yes || echo no)

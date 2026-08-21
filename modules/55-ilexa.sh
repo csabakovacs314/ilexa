@@ -184,6 +184,22 @@ if [ "$DRY_RUN" != 1 ]; then
   install -d -m 0750 -o "$WEB_USER" -g "$WEB_GROUP" /var/log/quarantine-admin
   install -d -m 0700 -o "$WEB_USER" -g "$WEB_GROUP" /var/cache/quarantine-admin
   install -d -m 0755 -o "$WEB_USER" -g "$WEB_GROUP" "$ILEXA_LIST_DIR"
+  # Console UI language, seeded ONCE: the file is console-owned state
+  # (Admin -> language rewrites it), so a module re-run must never reset an
+  # operator's later choice. Bare language code, no newline -- qa_lang()
+  # trims, qa_lang_set() writes the same shape.
+  if [ ! -e /var/cache/quarantine-admin/language ]; then
+    _lang="${ILEXA_LANG:-en}"
+    if [ ! -f "$SRC/lang/${_lang}.php" ]; then
+      log_warn "no lang/${_lang}.php in the console bundle — seeding language 'en' instead"
+      _lang=en
+    fi
+    printf '%s' "$_lang" > /var/cache/quarantine-admin/language
+    chown "$WEB_USER:$WEB_GROUP" /var/cache/quarantine-admin/language
+    chmod 644 /var/cache/quarantine-admin/language
+    log_info "console language seeded: $_lang"
+    unset _lang
+  fi
 else
   log_info "[dry-run] would create /var/log|cache|lib quarantine-admin dirs"
 fi
