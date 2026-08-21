@@ -178,6 +178,31 @@ GLOBAL_PLUGINS="zlib"
   echo "}"
 } | write_file /etc/dovecot/conf.d/99-mail-deploy.conf 644
 
+# --- quarantine folders: exist for every user, from first login -------------
+# The ilexa console's quarantine view runs `doveadm search -A` over every
+# folder in QUARANTINE_FOLDERS on every page render, and 58-report-learn
+# saves reported spam into Spam with `doveadm save` -- BOTH fail with
+# "Mailbox doesn't exist" (doveadm exit 68) for any user who lacks the
+# folder, which on a fresh install is every user, so the console showed its
+# loud gateway-failure banner on every single page (observed on the 24.04
+# box the moment the first console page rendered; the reference host never
+# hit it because its 15-mailboxes.conf declares Spam auto=subscribe).
+# auto=subscribe also makes the folder visible in webmail without the user
+# hunting for it. No special_use here: the distro's stock 15-mailboxes.conf
+# already assigns \Junk, and a second claimant would just draw warnings.
+{
+  echo "# Quarantine folders (QUARANTINE_FOLDERS) — auto-created + subscribed so"
+  echo "# the console's search-all and the spam@/ham@ report path never hit"
+  echo "# 'Mailbox doesn't exist'. Rendered by 25-dovecot."
+  echo "namespace inbox {"
+  for _qf in $QUARANTINE_FOLDERS; do
+    echo "  mailbox $_qf {"
+    echo "    auto = subscribe"
+    echo "  }"
+  done
+  echo "}"
+} | write_file /etc/dovecot/conf.d/99-quarantine-mailboxes.conf 644
+
 # --- optional: last_login ---
 if [ "$ENABLE_LAST_LOGIN" = yes ]; then
   db_exec "CREATE TABLE IF NOT EXISTS postfix.last_login (username VARCHAR(255) NOT NULL PRIMARY KEY, last_login BIGINT NOT NULL);"
