@@ -333,6 +333,14 @@ if [ "$DRY_RUN" != 1 ]; then
   _ilexa_deploy_out=$(cd "$SRC" && bash ./deploy.sh 2>&1) && log_info "ilexa deployed to $DST" || {
     log_warn "ilexa deploy.sh failed — $DST was NOT updated"
     while IFS= read -r _l; do [ -n "$_l" ] && log_warn "  $_l"; done <<<"$_ilexa_deploy_out"
+    # Hard failure, not a warning: with no webroot there IS no console --
+    # every remaining line of this module (crons, logrotate, helpers) dresses
+    # up a corpse, and the old behaviour then logged "done — console at
+    # <url>" and marked the module complete. A finished install with nothing
+    # at /ilexa/ was the observed result (24.04 redeploy, 2026-08-21, where a
+    # lint-gate bug in the bundle made deploy.sh refuse). Dying here leaves
+    # the marker unset, so a re-run after fixing the cause redeploys cleanly.
+    die "ilexa console deploy failed (see the lines above) — fix the cause and re-run: ./deploy.sh --only 55-ilexa"
   }
   unset _ilexa_deploy_out _l
 fi
