@@ -156,6 +156,24 @@ for h in $(awk '$1 !~ /^#/ && NF >= 3 && $3 == "list" { print $1 }' "$SRC/instal
   fi
 done
 
+# Seed the on-demand IOC lookup services that need NO API key (HRBL,
+# Mailspike, url.vet) as enabled -- once, only when no config exists yet, so
+# a module re-run never overrides operator toggles made in Rendszer since.
+# The keyed services stay off until their key arrives; keyless ones being
+# off too just made a fresh console's IOC page show zero reputation columns
+# for no discoverable reason. (Same seed in the app's install-console.sh for
+# the add-to-existing-server path.)
+if [ "$DRY_RUN" != 1 ] && [ ! -f /etc/ilexa/ioc_lookup.conf ]; then
+  for _s in hrbl mailspike urlvet; do
+    /usr/local/sbin/qa-ioclookup-config.sh enable "$_s" >/dev/null 2>&1 \
+      && log_info "IOC lookup enabled by default (keyless): $_s" \
+      || log_warn "could not enable IOC lookup '$_s' — enable it later in Rendszer"
+  done
+  unset _s
+elif [ "$DRY_RUN" = 1 ]; then
+  log_info "[dry-run] would enable keyless IOC lookups (hrbl mailspike urlvet) if unconfigured"
+fi
+
 # cron-alert.sh is a general-purpose "run this, journal it, mail on hard
 # failure" wrapper -- not OTX-specific, even though it lives under
 # assets/otx/ (its first, historical consumer). It must be installed here,
