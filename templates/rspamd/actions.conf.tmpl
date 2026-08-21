@@ -1,0 +1,22 @@
+# ─────────────────────────────────────────────────────────────────
+#  rspamd enforcement thresholds — the "Light" posture.
+#
+#    * Spam is DELIVERED, subject-tagged "@@SPAM_SUBJECT_TAG@@" — never held
+#      server-side. There is deliberately no quarantine to release from; users
+#      sort locally and admins recover from the archive if it is enabled.
+#    * reject is a HIGH, near-zero-false-positive safety net only. Calibrate
+#      before lowering it: on the reference system legitimate mail was observed
+#      scoring as high as 11.79, so 15 leaves real margin.
+#    * Setting reject to a finite value also ARMS the forced CLAM_VIRUS reject
+#      in force_actions.conf. With reject = null, virus mail would be accepted.
+#    * greylist is off — it trades delivery latency for a benefit rspamd's other
+#      signals already provide here.
+#
+#  Authenticated submission and localhost-injected mail are exempted from all of
+#  this in settings.conf.
+# ─────────────────────────────────────────────────────────────────
+greylist = null;
+add_header = @@SPAM_ADD_HEADER@@;
+rewrite_subject = @@SPAM_REWRITE_SUBJECT@@;
+reject = @@SPAM_REJECT@@;
+subject = "@@SPAM_SUBJECT_TAG@@ %s";

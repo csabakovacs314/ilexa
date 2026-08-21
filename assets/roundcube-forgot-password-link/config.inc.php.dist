@@ -1,0 +1,5 @@
+<?php
+
+// URL to PostfixAdmin's own password-recover.php. Leave empty to disable
+// the login-page link entirely (no link is better than a dead one).
+$config['forgot_password_link_url'] = '';

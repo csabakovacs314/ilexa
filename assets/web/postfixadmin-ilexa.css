@@ -1,0 +1,179 @@
+/* postfixadmin-ilexa.css — makes PostfixAdmin look like the ilexa console.
+ *
+ * Loaded via $CONF['theme_custom_css'], which header.tpl emits AFTER
+ * $CONF['theme_css'] (Bootstrap 3.4.1), so everything here is an override and
+ * no PostfixAdmin file is modified — this survives upgrades.
+ *
+ * The palette is copied from ilexa's own tokens in views/layout_head.php
+ * (:root). Kept as literal values rather than CSS custom properties because
+ * they must win against Bootstrap's own specificity in one file with no build
+ * step; if ilexa's palette changes, update it here to match.
+ *
+ * Served same-origin from PostfixAdmin's public/css/, which satisfies the
+ * style-src 'self' in the CSP meta tag header.tpl sets.
+ */
+
+:root {
+    --ilexa-bg:            #f1f5f9;
+    --ilexa-surface:       #ffffff;
+    --ilexa-border:        #e2e8f0;
+    --ilexa-text:          #0f172a;
+    --ilexa-text-muted:    #475569;
+    --ilexa-primary:       #c04c06;
+    --ilexa-primary-dark:  #9c3d05;
+    --ilexa-primary-light: #f3ded2;
+    --ilexa-success:       #059669;
+    --ilexa-danger:        #dc2626;
+    --ilexa-warning:       #a16207;
+    --ilexa-radius:        8px;
+    --ilexa-radius-sm:     5px;
+    --ilexa-shadow:        0 1px 3px 0 rgb(0 0 0 / .1), 0 1px 2px -1px rgb(0 0 0 / .1);
+}
+
+/* ── Base ─────────────────────────────────────────────────────────────── */
+body {
+    font-family: 'Inter', system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+    background: var(--ilexa-bg);
+    color: var(--ilexa-text);
+    -webkit-font-smoothing: antialiased;
+}
+a          { color: var(--ilexa-primary); }
+a:hover,
+a:focus    { color: var(--ilexa-primary-dark); }
+
+h1, h2, h3, h4 { color: var(--ilexa-text); font-weight: 700; }
+
+/* ── Navbar ───────────────────────────────────────────────────────────── */
+/* Deliberately LIGHT, not the console's dark sidebar ink. PostfixAdmin's
+   navbar carries its logo (public/images/logo-default.png), which is dark ink
+   on transparent -- measured mean luminance 37/255 across its opaque pixels --
+   so a dark bar renders the logo effectively invisible. A light surface also
+   reads correctly in context: this page sits in the console's CONTENT area,
+   where ilexa's own surfaces are white, and the dark ink belongs to the
+   sidebar beside it rather than competing with it. */
+.navbar-default {
+    background: var(--ilexa-surface);
+    border: 0;
+    border-bottom: 1px solid var(--ilexa-border);
+    border-radius: 0;
+    box-shadow: var(--ilexa-shadow);
+}
+.navbar-default .navbar-brand,
+.navbar-default .navbar-nav > li > a,
+.navbar-default .navbar-text        { color: var(--ilexa-text-muted); font-weight: 600; }
+.navbar-default .navbar-brand:hover,
+.navbar-default .navbar-nav > li > a:hover,
+.navbar-default .navbar-nav > li > a:focus {
+    color: var(--ilexa-primary);
+    background: var(--ilexa-primary-light);
+}
+/* The active tab is tinted rather than filled, so the bar stays light all the
+   way across and the logo keeps its contrast. */
+.navbar-default .navbar-nav > .active > a,
+.navbar-default .navbar-nav > .active > a:hover,
+.navbar-default .navbar-nav > .active > a:focus {
+    color: var(--ilexa-primary);
+    background: var(--ilexa-primary-light);
+    box-shadow: inset 0 -2px 0 0 var(--ilexa-primary);
+}
+.navbar-default .navbar-toggle              { border-color: var(--ilexa-border); }
+.navbar-default .navbar-toggle .icon-bar    { background: var(--ilexa-text-muted); }
+.navbar-default .navbar-toggle:hover,
+.navbar-default .navbar-toggle:focus        { background: var(--ilexa-primary-light); }
+.dropdown-menu > .active > a,
+.dropdown-menu > .active > a:hover,
+.dropdown-menu > .active > a:focus          { background: var(--ilexa-primary); }
+
+/* ── Buttons ──────────────────────────────────────────────────────────── */
+.btn {
+    border-radius: var(--ilexa-radius-sm);
+    font-weight: 600;
+    transition: background 150ms cubic-bezier(.4, 0, .2, 1);
+}
+.btn-primary {
+    background: var(--ilexa-primary);
+    border-color: var(--ilexa-primary);
+}
+.btn-primary:hover,
+.btn-primary:focus,
+.btn-primary:active,
+.btn-primary.active,
+.open > .dropdown-toggle.btn-primary {
+    background: var(--ilexa-primary-dark);
+    border-color: var(--ilexa-primary-dark);
+}
+.btn-success { background: var(--ilexa-success); border-color: var(--ilexa-success); }
+.btn-danger  { background: var(--ilexa-danger);  border-color: var(--ilexa-danger); }
+.btn-warning { background: var(--ilexa-warning); border-color: var(--ilexa-warning); }
+
+/* ── Panels / tables: the console's card look ─────────────────────────── */
+.panel {
+    border: 1px solid var(--ilexa-border);
+    border-radius: var(--ilexa-radius);
+    box-shadow: var(--ilexa-shadow);
+}
+.panel-default > .panel-heading {
+    background: var(--ilexa-surface);
+    border-bottom: 1px solid var(--ilexa-border);
+    color: var(--ilexa-text);
+    font-weight: 700;
+    border-radius: var(--ilexa-radius) var(--ilexa-radius) 0 0;
+}
+.panel-primary > .panel-heading {
+    background: var(--ilexa-primary);
+    border-color: var(--ilexa-primary);
+}
+.table > thead > tr > th {
+    background: #f8fafc;
+    border-bottom: 2px solid var(--ilexa-border);
+    color: var(--ilexa-text-muted);
+    font-size: .82em;
+    font-weight: 700;
+    letter-spacing: .01em;
+    text-transform: uppercase;
+}
+.table > tbody > tr > td      { border-top: 1px solid var(--ilexa-border); }
+.table-striped > tbody > tr:nth-of-type(odd) { background: #f8fafc; }
+.table-hover > tbody > tr:hover              { background: var(--ilexa-primary-light); }
+
+/* ── Forms ────────────────────────────────────────────────────────────── */
+.form-control {
+    border: 1px solid var(--ilexa-border);
+    border-radius: var(--ilexa-radius-sm);
+    box-shadow: none;
+    color: var(--ilexa-text);
+}
+.form-control:focus {
+    border-color: var(--ilexa-primary);
+    box-shadow: 0 0 0 3px rgb(192 76 6 / .15);
+}
+
+/* ── Alerts / labels ──────────────────────────────────────────────────── */
+.alert          { border-radius: var(--ilexa-radius-sm); border-width: 1px; }
+.alert-success  { background: #ecfdf5; border-color: #6ee7b7; color: #047857; }
+.alert-danger   { background: #fef2f2; border-color: #fca5a5; color: #b91c1c; }
+.alert-warning  { background: #eee2d2; border-color: #a16207; color: #a16207; }
+.alert-info     { background: #fbf4f0; border-color: var(--ilexa-primary-light); color: var(--ilexa-text-muted); }
+.label-primary  { background: var(--ilexa-primary); }
+.label-success  { background: var(--ilexa-success); }
+.label-danger   { background: var(--ilexa-danger); }
+
+/* ── Footer ───────────────────────────────────────────────────────────── */
+/* PostfixAdmin renders this inside the ilexa console's iframe, where the
+   console already supplies the page chrome — so keep it quiet rather than
+   competing with it. */
+.footer {
+    background: transparent;
+    border-top: 1px solid var(--ilexa-border);
+    color: var(--ilexa-text-muted);
+    font-size: .85em;
+    margin-top: 24px;
+    padding: 14px 0;
+}
+.footer a { color: var(--ilexa-text-muted); text-decoration: underline; }
+.footer a:hover { color: var(--ilexa-primary); }
+
+/* ── Embedded in ilexa ────────────────────────────────────────────────── */
+/* The console frames this page and provides its own outer padding, so drop the
+   body's top gap that assumes a standalone browser window. */
+.container { padding-top: 0; }

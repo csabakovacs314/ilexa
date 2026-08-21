@@ -1,0 +1,13 @@
+[Unit]
+Description=DNSBL (rbldnsd) otx instance for postscreen
+After=network.target
+
+[Service]
+ExecStart=/sbin/rbldnsd -n -r /var/lib/rbldnsd -e -b 127.0.0.1/530 otx.rbl:ip4set:otx.rbl
+# rbldnsd has no sd_notify watchdog; a HUNG-but-alive daemon is caught by the
+# end-to-end probe /usr/bin/rbldnsd-liveness.sh instead.
+Restart=on-failure
+RestartSec=5s
+
+[Install]
+WantedBy=multi-user.target

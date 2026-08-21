@@ -1,0 +1,13 @@
+# dovecot-dict-last-login.conf.ext — rendered by mail-deploy.
+# MUST be 640 root:dovecot: the dict service runs as the dovecot internal user
+# and reads this at write time (600 root:root fails silently — no row written).
+connect = host=127.0.0.1 dbname=postfix user=@@DB_USER@@ password=@@DB_PASSWORD@@
+map {
+  pattern = shared/last-login/$user
+  table = last_login
+  value_field = last_login
+  value_type = uint
+  fields {
+    username = $user
+  }
+}

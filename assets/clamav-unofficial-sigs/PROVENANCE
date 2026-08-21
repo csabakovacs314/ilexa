@@ -1,0 +1,41 @@
+clamav-unofficial-sigs — vendored third-party code
+==================================================
+
+Upstream:  https://github.com/extremeshok/clamav-unofficial-sigs
+Release:   8.0.0  (published 2026-07-02)
+Commit:    a6ac0e3b02e3a9c3c40f3d3fc6784f869ada43e9
+Source:    https://github.com/extremeshok/clamav-unofficial-sigs/archive/refs/tags/8.0.0.tar.gz
+Tarball:   sha256 1ff2e68038aa728a2f84f43f52a2dfb8fd1cce6bc4ea8d47854e1a0d5c5c04ae
+Vendored:  2026-08-16
+Licence:   BSD 3-Clause (see the header of clamav-unofficial-sigs.sh)
+
+WHY THESE FILES ARE IN THE REPO RATHER THAN FETCHED AT INSTALL TIME
+-------------------------------------------------------------------
+This is third-party code on a mail server, so it is pinned and reviewable
+rather than downloaded on every install. Upstream's own INSTALL.md instructs
+
+    wget .../clamav-unofficial-sigs/master/clamav-unofficial-sigs.sh -O ...
+
+which fetches the tip of master at whatever moment the install happens to run:
+unpinned, unverifiable, and different on two hosts installed a day apart.
+Vendoring the 8.0.0 release instead means the installer needs no network for
+this step, the exact bytes are in git and diffable on upgrade, and a tampered
+mirror cannot change what lands on the host. 90-verify checks SHA256SUMS.
+
+WHY IT IS NEEDED AT ALL
+-----------------------
+Only on Debian/Ubuntu. EL gets the same 8.0.0 from EPEL as a real package
+(clamav-unofficial-sigs-8.0.0-1.el9, verified identical apart from two EPEL
+packaging defaults), and that path is unchanged. Debian and Ubuntu have no
+usable package: noble and trixie onward dropped it, and the 3.7.2 still in
+jammy/bookworm is a different upstream whose config layout the ilexa console
+cannot drive. Without these files the console's ClamAV signature-source and
+YARA panel stays hidden on every Debian/Ubuntu host.
+
+UPGRADING
+---------
+Re-download the new release tarball, replace these five files, regenerate
+SHA256SUMS, and update the release/commit/sha256 lines above. Diff the new
+master.conf against the old one first: the console reads default_dbs_rating,
+enable_yararules and the per-source *_enabled / *_dbs_rating keys from it, and
+a renamed key silently changes what the panel reports.

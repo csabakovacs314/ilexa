@@ -1,0 +1,240 @@
+# main.cf — rendered by mail-deploy (templatized from the reference box).
+# Double-at placeholders are filled by render(); native $postfix vars are preserved.
+
+mydomain = @@PRIMARY_DOMAIN@@
+myhostname = @@MAIL_FQDN@@
+mydestination = $myhostname, localhost.$mydomain
+myorigin = $mydomain
+
+smtpd_banner = $myhostname ESMTP
+biff = no
+
+# --- SASL (Dovecot) ---
+smtpd_sasl_auth_enable = yes
+broken_sasl_auth_clients = yes
+smtpd_sasl_type = dovecot
+smtpd_sasl_path = private/auth
+smtpd_sasl_security_options = noanonymous
+smtpd_sasl_local_domain = $myhostname
+
+# ---- SMTP smuggling (CVE-2023-51764) ---------------------------------------
+# Postfix must not accept a bare LF as end-of-data. Without this an attacker
+# can append a second message that inherits this server's SPF/DKIM/DMARC pass.
+# Verified exploitable on a real host before this was added: a bare "\n.\n"
+# ended the message and the following MAIL FROM opened a new transaction.
+# Supported on every Postfix this installer targets (backported to 3.5.24+).
+#
+# The exclusion keeps strict parsing off for $mynetworks, where local, possibly
+# sloppy submitters (scripts, MFPs, legacy apps) live -- Postfix's own
+# recommended pairing, and it is what stops this from bouncing internal mail.
+smtpd_forbid_bare_newline = yes
+smtpd_forbid_bare_newline_exclusions = $mynetworks
+
+# Reject commands sent before the client is allowed to pipeline them. Cheap,
+# and complements the reject_unauth_pipelining already in the restriction
+# lists below.
+smtpd_forbid_unauth_pipelining = yes
+
+# Server picks the cipher, and definitively broken ones are off the table.
+# INBOUND (smtpd) only, deliberately: outbound smtp_tls here is opportunistic,
+# and Postfix warns that restricting ciphers on opportunistic TLS turns a
+# failed handshake into a PLAINTEXT delivery -- worse than a weak cipher.
+tls_preempt_cipherlist = yes
+smtpd_tls_exclude_ciphers = aNULL, eNULL, EXPORT, DES, RC4, MD5, PSK, SRP, 3DES
+
+smtpd_tls_security_level = may
+smtpd_tls_auth_only = yes
+default_process_limit = 300
+tls_random_source = dev:/dev/urandom
+
+append_dot_mydomain = no
+data_directory = /var/lib/postfix
+
+alias_maps = hash:/etc/aliases
+alias_database = hash:/etc/aliases
+
+relayhost =
+relay_domains = $mydestination
+mynetworks = @@MYNETWORKS@@
+
+mailbox_size_limit = 0
+recipient_delimiter = +
+inet_interfaces = all
+inet_protocols = @@INET_PROTOCOLS@@
+
+transport_maps = hash:/etc/postfix/transport
+
+# --- rate limiting ---
+anvil_rate_time_unit = 60s
+anvil_status_update_time = 90s
+smtpd_client_message_rate_limit = 50
+smtpd_client_connection_count_limit = 60
+
+# --- restrictions ---
+smtpd_client_restrictions = permit_mynetworks, permit_sasl_authenticated,
+    reject_invalid_hostname,
+    reject_unauth_destination,
+    permit
+
+# Time limit for the policyd-spf spawn service. The parameter name must match
+# the master.cf SERVICE NAME, which here is "policyd-spf" -- this said
+# "policy_time_limit", which names a service this installer never defines. The
+# result: policyd-spf silently ran on the default command_time_limit instead of
+# the 3600s the SPF policy daemon documents, and postfix printed
+#   warning: /etc/postfix/main.cf: unused parameter: policy_time_limit=3600s
+# on EVERY postconf and postfix invocation, on every installed host.
+#
+# It was copied from the reference host, which DOES have a master.cf service
+# called "policy" and so consumes it correctly -- the setting was right there
+# and wrong here. The correct policyd-spf_time_limit was already set further
+# down this file, so the stray line is simply removed rather than renamed.
+
+smtpd_helo_restrictions = permit_mynetworks, permit_sasl_authenticated,
+    reject_unauth_pipelining,
+    reject_invalid_hostname,
+    warn_if_reject reject_unknown_hostname,
+    permit
+
+disable_vrfy_command = yes
+smtpd_helo_required = yes
+
+smtpd_relay_restrictions = permit_mynetworks,
+    permit_sasl_authenticated,
+    reject_unauth_destination
+
+policyd-spf_time_limit = 3600
+smtpd_recipient_restrictions =
+    permit_mynetworks,
+    permit_sasl_authenticated,
+    reject_unauth_destination,
+    check_policy_service unix:private/policyd-spf@@QUOTA_POLICY@@
+
+smtpd_data_restrictions =
+    reject_unauth_pipelining,
+    permit
+
+# --- milters: OpenDKIM (8891), OpenDMARC (8893), rspamd (11332) ---
+# rspamd MUST be listed here, not only appended by 40-rspamd's postconf call.
+# That module adds it after this file is written, so a full install ends up
+# correct -- but re-running 20-postfix for any reason re-renders main.cf from
+# this template and silently drops rspamd back out of the chain, leaving a
+# server that accepts and delivers every message completely unscanned with no
+# error anywhere. Observed on the Ubuntu test host after a --only 20-postfix.
+# 40-rspamd's own wiring is idempotent and simply finds it already present.
+smtpd_milters = inet:127.0.0.1:8891,inet:127.0.0.1:8893,@@RSPAMD_MILTER@@
+non_smtpd_milters = $smtpd_milters
+milter_default_action = accept
+milter_protocol = 6
+
+# --- virtual domains (MySQL / PostfixAdmin schema) ---
+virtual_mailbox_domains = proxy:mysql:/etc/postfix/sql/mysql_virtual_domains_maps.cf
+virtual_alias_maps =
+    proxy:mysql:/etc/postfix/sql/mysql_virtual_alias_maps.cf,
+    proxy:mysql:/etc/postfix/sql/mysql_virtual_alias_domain_maps.cf,
+    proxy:mysql:/etc/postfix/sql/mysql_virtual_alias_domain_catchall_maps.cf
+virtual_mailbox_maps =
+    proxy:mysql:/etc/postfix/sql/mysql_virtual_mailbox_maps.cf,
+    proxy:mysql:/etc/postfix/sql/mysql_virtual_alias_domain_mailbox_maps.cf
+
+virtual_gid_maps = static:@@MAIL_GID@@
+virtual_mailbox_base = @@MAIL_STORE@@
+virtual_minimum_uid = @@MAIL_UID@@
+virtual_transport = virtual
+virtual_uid_maps = static:@@MAIL_UID@@
+
+local_recipient_maps = $virtual_mailbox_maps
+message_size_limit = @@MESSAGE_SIZE_LIMIT@@
+# Postfix REFUSES to start the virtual delivery agent when
+# virtual_mailbox_limit < message_size_limit ("fatal: configuration error"),
+# and it was never set here -- so it kept its 51200000 default while
+# message_size_limit defaults to 52428800. Every delivery died with
+# "bad command startup -- throttling" and mail piled up in the queue.
+# Pinned to the same value, which is what the reference host does.
+virtual_mailbox_limit = @@MESSAGE_SIZE_LIMIT@@
+
+header_checks = pcre:/etc/postfix/header_checks
+html_directory = no
+setgid_group = postdrop
+compatibility_level = 2
+smtputf8_enable = no
+
+# --- TLS ---
+smtp_use_tls = yes
+smtpd_use_tls = yes
+smtpd_tls_mandatory_protocols = !SSLv2,!SSLv3,!TLSv1,!TLSv1.1
+smtp_tls_mandatory_protocols  = !SSLv2,!SSLv3,!TLSv1,!TLSv1.1
+smtpd_tls_protocols           = !SSLv2,!SSLv3,!TLSv1,!TLSv1.1
+smtp_tls_protocols            = !SSLv2,!SSLv3,!TLSv1,!TLSv1.1
+smtpd_tls_mandatory_ciphers   = high
+smtp_tls_mandatory_ciphers    = high
+smtp_tls_note_starttls_offer = yes
+smtpd_tls_loglevel = 1
+smtpd_tls_received_header = yes
+smtpd_tls_session_cache_timeout = 10800s
+smtp_tls_session_cache_database = btree:$data_directory/smtp_tls_session_cache
+smtpd_tls_key_file = @@TLS_KEY@@
+smtpd_tls_cert_file = @@TLS_CERT@@
+smtpd_tls_CAfile = @@TLS_CAFILE@@
+smtp_tls_CAfile = $smtpd_tls_CAfile
+smtp_tls_cert_file = @@TLS_CERT@@
+smtp_tls_key_file = @@TLS_KEY@@
+smtp_tls_security_level = dane
+smtp_dns_support_level = dnssec
+smtp_host_lookup = dns
+
+# --- misc hardening ---
+allow_percent_hack = no
+resolve_dequoted_address = no
+# ---- sender identity: stop authenticated users sending as each other -------
+# Without a *_sender_login_mismatch clause nothing checks MAIL FROM against the
+# SASL login, so ANY account can send as ANY other -- including as the
+# postmaster. The map alone does nothing: it is only consulted by the clause
+# below. (The reference host had the map configured and no clause, i.e. it was
+# loaded and never read.)
+#
+# Owners come from two maps: a mailbox owns its own address, and an alias is
+# owned by its goto targets (so members of a shared role alias can use it).
+smtpd_sender_login_maps =
+    proxy:mysql:/etc/postfix/sql/mysql-email2email.cf
+    proxy:mysql:/etc/postfix/sql/mysql-sender-login-alias.cf
+
+# @@SENDER_LOGIN_GUARD@@ is set from SENDER_LOGIN_POLICY in the answers file:
+#   warn    -> "warn_if_reject reject_authenticated_sender_login_mismatch, "
+#   enforce -> "reject_authenticated_sender_login_mismatch, "
+#   off     -> "" (no clause at all)
+#
+# Two ordering rules that are easy to get wrong, both learned the hard way:
+#
+#  1. The guard MUST come before permit_mynetworks. permit_* terminates the
+#     list, so with permit_mynetworks first every client in mynetworks skips
+#     the check -- and webmail (Roundcube) submits over localhost, so all
+#     webmail users would silently keep full spoofing rights.
+#  2. Use the *authenticated* variant. Plain reject_sender_login_mismatch also
+#     rejects UNauthenticated mail claiming a local address, which breaks
+#     forwarders and bounce traffic.
+#
+# Start at "warn": it logs "Sender address rejected: not owned by user <login>"
+# via reject_warning without refusing anything, so a real delegation pattern
+# (one person sending for several role addresses, MFPs/scanners using a shared
+# From) shows up in the log BEFORE it starts bouncing mail. Review with:
+#   grep 'not owned by user' /var/log/maillog   (EL)
+#   grep 'not owned by user' /var/log/mail.log  (Debian/Ubuntu)
+# then switch to enforce once the list is understood and each case is either
+# legitimised (add the address to the sender's alias goto) or corrected.
+smtpd_sender_restrictions = @@SENDER_LOGIN_GUARD@@permit_mynetworks, permit
+
+smtpd_delay_reject = @@SMTPD_DELAY_REJECT@@
+smtpd_error_sleep_time = 30
+smtpd_soft_error_limit = 10
+smtpd_hard_error_limit = 20
+soft_bounce = no
+
+# --- postscreen DNSBL ---
+postscreen_access_list        = permit_mynetworks
+postscreen_blacklist_action   = enforce
+postscreen_greet_action       = enforce
+postscreen_dnsbl_action       = enforce
+postscreen_dnsbl_threshold    = 3
+postscreen_dnsbl_sites = @@POSTSCREEN_DNSBL_SITES@@
+postscreen_cache_map          = btree:/var/lib/postfix/postscreen_cache
+postscreen_cache_retention_time = 7d

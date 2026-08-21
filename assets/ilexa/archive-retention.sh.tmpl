@@ -1,0 +1,25 @@
+#!/bin/bash
+# ─────────────────────────────────────────────────────────────────
+#  archive-retention.sh — enforce the 30-day central-archive window.
+#  Expunges archive@ messages older than 30 days, then prunes the
+#  matching rows from postfix.archive_index (aligned by save-date).
+#  Run daily as root via cron-alert.sh.
+# ─────────────────────────────────────────────────────────────────
+set -uo pipefail
+MB='@@ARCHIVE_USER@@'
+CRED='/etc/quarantine-admin/indexer-db.php'
+
+# 1. Expunge messages saved more than 30 days ago (no-op if none match).
+#    -o mail_plugins=zlib → keep fts off the archive (avoid indexing the firehose).
+/usr/bin/doveadm -o mail_plugins=zlib expunge -u "$MB" mailbox INBOX savedbefore @@ARCHIVE_RETENTION_DAYS@@d 2>/dev/null || true
+
+# 2. Prune index rows older than the same 30-day window (ts = save epoch).
+cutoff=$(date -d '@@ARCHIVE_RETENTION_DAYS@@ days ago' +%s)
+/usr/bin/php -r '
+$c = require $argv[1];
+$p = new PDO("mysql:unix_socket={$c["socket"]};dbname={$c["db"]}", $c["user"], $c["pass"],
+             [PDO::ATTR_ERRMODE => PDO::ERRMODE_EXCEPTION]);
+$s = $p->prepare("DELETE FROM archive_index WHERE ts < ?");
+$s->execute([(int)$argv[2]]);
+fwrite(STDOUT, "archive-retention: pruned " . $s->rowCount() . " index rows (cutoff=" . $argv[2] . ")\n");
+' "$CRED" "$cutoff"

@@ -1,0 +1,7 @@
+# Controller: bound to localhost only. Reach the web UI through an SSH tunnel.
+# localhost is trusted so local `rspamc` works without credentials — the ilexa
+# dashboard calls a bare `rspamc stat` as the web user and needs this.
+bind_socket = "@@RSPAMD_CTRL@@";
+secure_ip = "127.0.0.1";
+secure_ip = "::1";
+password = "@@RSPAMD_CTRL_PW_HASH@@";

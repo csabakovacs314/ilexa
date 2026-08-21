@@ -1,0 +1,10 @@
+# Hard-reject a real virus/signature detection. A forced (pre-result) action cannot
+# be offset by ham symbols. CLAM_VIRUS_FAIL (scan error), CLAM_VIRUS_ENCRYPTED
+# (unscannable) and CLAM_YARA are intentionally excluded.
+rules {
+  clam_virus_reject {
+    action = "reject";
+    expression = "CLAM_VIRUS";
+    message = "Message rejected: malware detected";
+  }
+}

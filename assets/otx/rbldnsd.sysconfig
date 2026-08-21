@@ -1,0 +1,1 @@
+RBLDNSD="otx -r /var/lib/rbldnsd -e -b 127.0.0.1/530 otx.rbl:ip4set:otx.rbl"

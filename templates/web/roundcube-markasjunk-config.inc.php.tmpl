@@ -1,0 +1,16 @@
+<?php
+// Roundcube markasjunk plugin — rendered by mail-deploy. Learns spam/ham
+// into rspamd via /usr/local/sbin/markasjunk-rspamd (installed alongside
+// this file), which strips scanner-verdict headers before calling
+// `rspamc learn_<class>` against the local controller (trusted via
+// secure_ip=127.0.0.1, no password needed).
+$config['markasjunk_learning_driver'] = 'cmd_learn';
+$config['markasjunk_spam_cmd'] = '/usr/local/sbin/markasjunk-rspamd spam %f';
+$config['markasjunk_ham_cmd']  = '/usr/local/sbin/markasjunk-rspamd ham  %f';
+// Must match the mailbox where suspected spam actually lands. Change by
+// hand post-install if your Spam folder is named differently.
+$config['markasjunk_spam_mbox'] = 'Spam';
+$config['markasjunk_ham_mbox']  = 'INBOX';
+$config['markasjunk_read_spam']   = true;
+$config['markasjunk_unread_ham']  = true;
+$config['markasjunk_add_flag']    = true;

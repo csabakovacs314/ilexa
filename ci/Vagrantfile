@@ -1,0 +1,22 @@
+# Vagrantfile — spin a disposable AlmaLinux VM and run the acceptance suite.
+# Usage:  cd ci && vagrant up                     (AlmaLinux 9, the default)
+#         cd ci && CI_BOX=almalinux/10 vagrant up  (AlmaLinux 10)
+#         (then `vagrant destroy -f` to clean up)
+# The whole toolkit is authoring-only against production; this VM is the ONLY
+# place deploy.sh should actually execute.
+Vagrant.configure("2") do |config|
+  config.vm.box = ENV["CI_BOX"] || "almalinux/9"
+  config.vm.hostname = "mail-ci"
+  config.vm.provider "virtualbox" do |vb|
+    vb.memory = 4096      # MailScanner/ClamAV need headroom
+    vb.cpus = 2
+  end
+  # the repo root is mounted read-only at /opt/mail-deploy
+  config.vm.synced_folder "..", "/opt/mail-deploy", type: "rsync",
+    rsync__exclude: [".git/"]
+  config.vm.provision "shell", inline: <<-SHELL
+    set -e
+    cp -a /opt/mail-deploy /root/mail-deploy
+    bash /root/mail-deploy/ci/run-acceptance.sh
+  SHELL
+end

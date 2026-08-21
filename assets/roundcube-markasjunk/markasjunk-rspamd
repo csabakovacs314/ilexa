@@ -1,0 +1,58 @@
+#!/usr/bin/python3
+# ─────────────────────────────────────────────────────────────────
+#  markasjunk-rspamd <spam|ham> <message-file>
+#
+#  Learning target for Roundcube's markasjunk plugin (cmd_learn driver).
+#  Repoints webmail "Mark as Junk / Not junk" from sa-learn (SpamAssassin,
+#  idle post-cutover) to rspamd — consistent with the Karantén tool and the
+#  Thunderbird spam@/ham@ reporter.
+#
+#  Strips scanner-added verdict headers (X-Spam*, X-Rspamd*, *MailScanner*)
+#  from the header block so Bayes isn't taught the scanner's own tokens, then
+#  pipes the message to `rspamc learn_<class>`. The controller trusts 127.0.0.1
+#  (secure_ip), so no password is needed. Always exits 0 so the webmail action
+#  never surfaces an error.
+# ─────────────────────────────────────────────────────────────────
+import sys, re, subprocess
+
+cls = sys.argv[1] if len(sys.argv) > 1 else ''
+if cls not in ('spam', 'ham'):
+    sys.exit(0)
+
+# Message comes from markasjunk's %f temp file (fallback: stdin).
+data = b''
+try:
+    if len(sys.argv) > 2 and sys.argv[2]:
+        with open(sys.argv[2], 'rb') as fh:
+            data = fh.read()
+    else:
+        data = sys.stdin.buffer.read()
+except OSError:
+    sys.exit(0)
+if not data:
+    sys.exit(0)
+
+# Drop scanner verdict headers (name line + any folded continuations).
+strip_re = re.compile(rb'^(x-spam|x-spamd-result|x-rspamd|x-[a-z0-9-]*mailscanner)', re.I)
+sep = b'\r\n\r\n' if b'\r\n\r\n' in data else b'\n\n'
+head, _, body = data.partition(sep)
+
+kept, skip = [], False
+for line in head.split(b'\n'):
+    if line[:1] in (b' ', b'\t'):        # folded continuation of previous header
+        if skip:
+            continue
+    else:
+        skip = bool(strip_re.match(line))
+        if skip:
+            continue
+    kept.append(line)
+clean = b'\n'.join(kept) + sep + body
+
+try:
+    subprocess.run(['/usr/bin/rspamc', '-h', '127.0.0.1:11334', 'learn_' + cls],
+                   input=clean, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+                   timeout=15)
+except Exception:
+    pass
+sys.exit(0)

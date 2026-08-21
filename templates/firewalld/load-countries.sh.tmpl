@@ -1,0 +1,73 @@
+#!/bin/bash
+# Rebuild the firewalld 'geoblock' ipset from ipdeny.com country zone files.
+# Writes the permanent ipset definition; apply it with 'firewall-cmd --reload'.
+#
+# The country list is admin-editable via the ilexa console
+# (qa-geoblock-config.sh writes /etc/ilexa/geoblock.conf); this script only
+# reads it.
+set -euo pipefail
+
+conf=/etc/ilexa/geoblock.conf
+[ -s "$conf" ] || { echo "geoblock: $conf missing or empty, aborting without changes" >&2; exit 1; }
+countries="$(grep -v '^#' "$conf" | tr -s ' \t\r\n' ' ')"
+[ -n "$(echo "$countries" | tr -d '[:space:]')" ] || { echo "geoblock: no countries configured in $conf, aborting without changes" >&2; exit 1; }
+
+ipset_xml="/etc/firewalld/ipsets/geoblock.xml"
+
+tmp="$(mktemp)"
+trap 'rm -f "$tmp"' EXIT
+
+# Keep the existing ipset header (type/options), then append fresh entries.
+# Truncate at the FIRST of either an existing <entry> line or the closing
+# </ipset> tag: a freshly-written header (module 60-firewalld.sh's own
+# write_file) has no <entry> lines at all, only the closing tag -- matching
+# on <entry> alone left that tag in place on a fresh install, so appending
+# new entries + a fresh closing tag afterward produced malformed XML
+# ("junk after document element") on every single run, forever, on any OS.
+# Confirmed live on a real host 2026-08-15 -- this had never actually
+# executed before (no VM run, ever).
+sed -E '/<entry>|<\/ipset>/,$d' "$ipset_xml" > "$tmp"
+
+raw="$(mktemp)"
+trap 'rm -f "$tmp" "$raw"' EXIT
+for country in $countries; do
+  wget -q "http://www.ipdeny.com/ipblocks/data/countries/$country.zone" -O "/var/lib/ilexa/geoip/$country.zone"
+  sed -e '/^$/d' "/var/lib/ilexa/geoip/$country.zone" >> "$raw"
+done
+
+# Collapse before emitting entries. firewalld's nftables backend stores a
+# hash:net ipset as an nft INTERVAL set, and a newer kernel rejects the entire
+# transaction if any two intervals overlap ("conflicting intervals specified"),
+# so one overlapping pair across the zone files loses the whole geoblock list.
+# Observed on Ubuntu 24.04 / kernel 6.8; EL9's older kernel tolerates overlaps,
+# so this is a harmless no-op there. collapse_addresses also merges adjacent
+# ranges, covering the same addresses in fewer entries.
+python3 - "$raw" <<'PYEOF' | sed 's|.*|  <entry>&</entry>|' >> "$tmp"
+import ipaddress, sys
+nets = []
+with open(sys.argv[1]) as f:
+    for line in f:
+        tok = line.strip()
+        if not tok:
+            continue
+        try:
+            net = ipaddress.ip_network(tok, strict=False)
+        except ValueError:
+            continue
+        if net.version == 4:
+            nets.append(net)
+for net in ipaddress.collapse_addresses(nets):
+    print(net.with_prefixlen)
+PYEOF
+
+echo '</ipset>' >> "$tmp"
+
+# Refuse to install a near-empty list (e.g. failed downloads) over the live one.
+count="$(grep -c '<entry>' "$tmp" || true)"
+if [ "$count" -lt 1000 ]; then
+  echo "geoblock: only $count entries built, aborting without changes" >&2
+  exit 1
+fi
+
+install -m 644 "$tmp" "$ipset_xml"
+command -v restorecon >/dev/null 2>&1 && restorecon "$ipset_xml" || true

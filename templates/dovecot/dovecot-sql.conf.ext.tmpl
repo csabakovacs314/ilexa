@@ -1,0 +1,7 @@
+# dovecot-sql.conf.ext — rendered by mail-deploy. 600 root:root (auth reads as root).
+driver = mysql
+default_pass_scheme = CRYPT
+connect = host=127.0.0.1 dbname=postfix user=@@DB_USER@@ password=@@DB_PASSWORD@@
+password_query = SELECT username AS user, password FROM mailbox WHERE username='%u' AND active='1'
+user_query = SELECT maildir, @@MAIL_UID@@ AS uid, @@MAIL_GID@@ AS gid@@QUOTA_FIELD@@ FROM mailbox WHERE username='%u' AND active='1'
+iterate_query = SELECT username AS user FROM mailbox WHERE active='1'

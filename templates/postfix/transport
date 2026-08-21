@@ -1,0 +1,2 @@
+# transport map — add per-domain/relay transports here; postmap on change.
+# example.com  :

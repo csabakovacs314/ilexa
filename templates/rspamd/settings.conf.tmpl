@@ -1,0 +1,13 @@
+# Without these two exemptions, a user's own outbound mail is scored like inbound
+# spam: submissions get subject-tagged and can be rejected outright, and anything
+# re-injected locally (cron, bounces, archive re-sends) is scored too.
+authenticated {
+  priority = high;
+  authenticated = true;
+  apply { actions { reject = null; rewrite_subject = null; add_header = null; greylist = null; } }
+}
+local_injected {
+  priority = high;
+  ip = "127.0.0.0/8";
+  apply { actions { reject = null; rewrite_subject = null; add_header = null; greylist = null; } }
+}

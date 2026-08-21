@@ -1,0 +1,22 @@
+# header_checks — pcre map referenced by main.cf.
+#
+# Intentionally contains NO active rules.
+#
+# This file used to ship a single line:
+#
+#     /^Received:/ HOLD
+#
+# which routed every message into Postfix's hold queue for MailScanner to pick
+# up. That was correct for the pre-2026 reference stack, but this installer
+# builds an rspamd-based server: rspamd runs as a milter (inet:127.0.0.1:11332)
+# and tags or rejects inbound mail directly, and MailScanner is not installed
+# at all. So the rule held EVERY message forever with nothing to release it.
+#
+# Observed on the Ubuntu 24.04 test host: 410 messages sat in the queue, all
+# "hold", and no mail was ever delivered to any mailbox. The reference host hit
+# the same thing and dropped the line during its rspamd cutover on 2026-08-06;
+# this template had not been updated to match.
+#
+# Add per-site rules below if you need them. Keep the file present either way:
+# main.cf references it as pcre:/etc/postfix/header_checks, and Postfix logs a
+# lookup error on every message if it is missing.

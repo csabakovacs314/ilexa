@@ -1,0 +1,24 @@
+[Unit]
+Description=Hungarian spam-classifier service (ilexa)
+After=network.target
+
+[Service]
+Type=simple
+ExecStart=/opt/hu-classify/venv/bin/python3 /usr/local/sbin/hu-classify-stub.py
+# DynamicUser rather than a hardcoded User=nobody Group=nobody: the "nobody"
+# GROUP only exists on EL, Debian/Ubuntu's equivalent is "nogroup" -- a
+# hardcoded Group=nobody would fail to start on every apt-based host. This
+# also gives the process no persistent identity to escalate from.
+DynamicUser=yes
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+MemoryMax=200M
+MemoryHigh=160M
+OOMPolicy=stop
+Restart=on-failure
+RestartSec=5s
+
+[Install]
+WantedBy=multi-user.target

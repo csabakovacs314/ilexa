@@ -1,0 +1,16 @@
+# Reuse the existing clamd via its unix socket. _rspamd must be in @@MTA_GROUP@@
+# to reach it.
+#
+# NOTE: no blanket `action = reject` here on purpose. That would force a reject on
+# EVERY clamd detection, including pattern-matched YARA hits, which are
+# false-positive prone. The reject is applied instead by a force_actions rule
+# scoped to CLAM_VIRUS, leaving CLAM_YARA score-only.
+clamav {
+  type = "clamav";
+  servers = "@@CLAMD_SOCKET@@";
+  scan_mime_parts = true;
+  symbol = "CLAM_VIRUS";
+  patterns {
+    CLAM_YARA = '^YARA\.';
+  }
+}

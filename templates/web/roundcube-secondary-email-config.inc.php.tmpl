@@ -1,0 +1,10 @@
+<?php
+// Roundcube secondary_email plugin — rendered by mail-deploy. chown apache:apache
+// after write. Reads/writes mailbox.email_other in the PostfixAdmin schema so
+// PostfixAdmin's own password-recover.php can use it -- this plugin never
+// implements recovery itself.
+$config['secondary_email_db_dsn'] = 'mysql://@@DB_USER@@:@@DB_PASSWORD@@@127.0.0.1/postfix';
+$config['secondary_email_resend_seconds'] = 60;
+$config['secondary_email_code_ttl'] = 600;
+// Leave unset to send from postmaster@<the user's own mail domain>.
+$config['secondary_email_from'] = '';

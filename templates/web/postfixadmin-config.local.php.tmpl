@@ -1,0 +1,64 @@
+<?php
+// config.local.php — rendered by mail-deploy. Loaded after config.inc.php,
+// survives PostfixAdmin upgrades. Ownership root:apache 640.
+$CONF['configured'] = true;
+
+// Unset, this falls back to a hardcoded "noreply@example.com" placeholder
+// (functions.inc.php smtp_get_admin_email()) as the From address on every
+// mail PostfixAdmin sends on its own behalf -- including the forgot-
+// password reset code (public/users/password-recover.php). Receivers with
+// a DMARC policy correctly reject that as unauthenticated.
+$CONF['admin_email'] = '@@POSTMASTER_EMAIL@@';
+
+// ---- language: follow the ilexa console ------------------------------------
+// ilexa stores its site-wide language as a bare 'hu'/'en' in this file, written
+// by its Admin tab; when the file is absent ilexa itself falls back to
+// LANG_DEFAULT ('hu'), so this mirrors that rather than assuming English.
+$_ilexa_lang_file = '@@ILEXA_LANG_FILE@@';
+$_ilexa_lang      = '@@ILEXA_LANG_DEFAULT@@';
+if (is_readable($_ilexa_lang_file)) {
+    $_l = strtolower(trim((string) @file_get_contents($_ilexa_lang_file)));
+    // Shape-check before it reaches a filesystem path below.
+    if (preg_match('/\A[a-z]{2}(-[a-z]{2})?\z/', $_l)) {
+        $_ilexa_lang = $_l;
+    }
+}
+if (is_readable(__DIR__ . '/languages/' . $_ilexa_lang . '.lang')) {
+    $CONF['default_language'] = $_ilexa_lang;
+    // check_language() consults $_POST['lang'], then $_COOKIE['lang'], then the
+    // browser's Accept-Language, and only THEN default_language. Setting the
+    // default alone would therefore lose to any browser advertising a language
+    // PostfixAdmin supports -- English browsers would keep getting English
+    // while the console was Hungarian. Seeding the $_COOKIE array (this request
+    // only; no Set-Cookie is ever sent) puts ilexa's choice ahead of the
+    // browser hint. The trade-off is deliberate: ilexa is the single source of
+    // truth for language, so PostfixAdmin's own language dropdown no longer
+    // sticks between requests.
+    $_COOKIE['lang'] = $_ilexa_lang;
+} else {
+    // ilexa is set to a language PostfixAdmin does not ship — stay on English
+    // rather than break every string on the page.
+    $CONF['default_language'] = 'en';
+}
+unset($_ilexa_lang_file, $_ilexa_lang, $_l);
+
+// ---- appearance ------------------------------------------------------------
+// Default was the unconfigured placeholder "Return to
+// change-this-to-your.domain.tld", which shipped to users as-is. Point it at
+// this server's console instead.
+$CONF['show_footer_text'] = 'YES';
+$CONF['footer_text']      = 'ilexa - @@MAIL_FQDN@@';
+$CONF['footer_link']      = '@@ILEXA_URL_PREFIX@@';
+
+// Bootstrap overrides that match the console's palette. header.tpl emits this
+// after theme_css, and it is served same-origin so the page's own CSP
+// (style-src 'self') allows it.
+$CONF['theme_custom_css'] = 'css/ilexa.css';
+$CONF['database_type'] = 'mysqli';
+$CONF['database_host'] = '127.0.0.1';
+$CONF['database_user'] = '@@DB_USER@@';
+$CONF['database_password'] = '@@DB_PASSWORD@@';
+$CONF['database_name'] = 'postfix';
+// domain_in_mailbox=YES => maildirs generated as domain/user@domain/ (full form),
+// matching Dovecot's %u lookup (short form makes delivered mail invisible).
+$CONF['domain_in_mailbox'] = 'YES';

@@ -1,0 +1,220 @@
+# Admin block/allow lists maintained by the ilexa console.
+#
+# The four .map files live under @@ILEXA_LIST_DIR@@, are written atomically by the
+# web user and must stay world-readable (0644) so _rspamd can read them. rspamd
+# hot-reloads them, so no reload is needed after an edit in the console.
+#
+# The `message` strings are load-bearing: ilexa's blocked-mail counter classifies
+# maillog by matching them. Change them here and the dashboard counter silently
+# stops counting blocklist rejects.
+admin_blocklist_env {
+  type = "from";
+  map = "@@ILEXA_LIST_DIR@@/blocklist_from.map";
+  regexp = true;
+  symbol = "ADMIN_BLOCKLIST";
+  action = "reject";
+  message = "Sender blocked by administrator";
+  description = "Envelope sender on the admin blocklist";
+}
+admin_blocklist_hdr {
+  type = "header";
+  header = "from";
+  filter = "email";
+  map = "@@ILEXA_LIST_DIR@@/blocklist_from.map";
+  regexp = true;
+  symbol = "ADMIN_BLOCKLIST_HDR";
+  action = "reject";
+  message = "Sender blocked by administrator";
+  description = "Visible From-header address on the admin blocklist";
+}
+admin_blocklist_ip {
+  type = "ip";
+  map = "@@ILEXA_LIST_DIR@@/blocklist_ip.map";
+  symbol = "ADMIN_BLOCKLIST_IP";
+  action = "reject";
+  message = "Sender blocked by administrator";
+  description = "Connecting IP on the admin blocklist";
+}
+# Allowlist: a large negative score, so the message can never be tagged or hit the
+# reject threshold. Forced actions (virus, forbidden attachment) still apply — an
+# allowlisted sender cannot post malware.
+admin_whitelist_env {
+  type = "from";
+  map = "@@ILEXA_LIST_DIR@@/whitelist_from.map";
+  regexp = true;
+  symbol = "ADMIN_WHITELIST";
+  score = -100.0;
+  description = "Envelope sender on the admin allowlist";
+}
+admin_whitelist_hdr {
+  type = "header";
+  header = "from";
+  filter = "email";
+  map = "@@ILEXA_LIST_DIR@@/whitelist_from.map";
+  regexp = true;
+  symbol = "ADMIN_WHITELIST_HDR";
+  score = -100.0;
+  description = "Visible From-header address on the admin allowlist";
+}
+admin_whitelist_ip {
+  type = "ip";
+  map = "@@ILEXA_LIST_DIR@@/whitelist_ip.map";
+  symbol = "ADMIN_WHITELIST_IP";
+  score = -100.0;
+  description = "Connecting IP on the admin allowlist";
+}
+
+# ── Score-only IP reputation feeds ───────────────────────────────────────────
+# The lists these read are refreshed daily by the update-*.sh scripts 72-feeds
+# installs. Without these rules those downloads are theatre: a real Ubuntu
+# 24.04 install had firehol.inc and emergingthreats.inc on disk, refreshed by
+# cron, and referenced by ZERO config files -- the whole score-only IP layer
+# was inert on installer-built hosts while the reference host has had it since
+# rollout.
+#
+# They live in this TEMPLATE rather than being appended by 72-feeds on purpose.
+# render() overwrites its destination unconditionally, so anything appended to
+# local.d/multimap.conf is silently lost the next time 40-rspamd runs -- e.g. a
+# `--only 40-rspamd` re-run. (70-otx.sh's otx_uri rule is appended and has
+# exactly that exposure; pre-existing, not fixed here.) Rendered rules survive
+# by construction.
+#
+# Scores are score-only signals, well below the reject threshold on their own,
+# and match the reference host symbol-for-symbol so the two stay supportable.
+#
+# A rule whose map does not exist yet is fine: rspamd logs one benign line
+# ("it will be read automatically if created") and the symbol never fires. The
+# maps are deliberately NOT pre-created as empty files -- an empty .inc has a
+# current mtime, which would make feeds-status.sh report a feed that has never
+# run as fresh-with-0-entries and feed a false signal to the feed dashboard.
+#
+# blocklist.de is deliberately absent. rspamd ships a stock bl.blocklist.de
+# DNSBL in modules.d/rbl.conf that checks BOTH from and received, so it sees
+# the relay chain; a type=ip multimap only ever sees the connecting IP. It is
+# always current and needs no maintenance, and a local snapshot of the same
+# source would only double-score it.
+#
+# It is NOT a strict superset of lists.blocklist.de/lists/all.txt, as this
+# comment used to claim. Measured 2026-08-19: of 120 sampled all.txt IPs, 98
+# answered in the DNSBL and 22 were stable NXDOMAIN on re-query -- an 18%
+# shortfall, with the zone's 2.0.0.127 control entry answering throughout, so
+# a real gap and not a resolver artifact.
+#
+# The shortfall is not random coverage loss, which is what makes dropping the
+# map still correct. all.txt enumerates whole CIDR blocks host-by-host that
+# the DNSBL does not carry -- that day 5.167.64.0/21 appeared complete, .0 and
+# .255 included, alongside five /24s in 216.151/216.152 and 188.143.23x.
+# Classified per miss, not by arithmetic: 21 of the 22 fell inside those
+# blocks (12 in 5.167.x, 3 in 216.151.x, 4 in 216.152.x, 2 in 188.143.23x),
+# leaving exactly one outlier, 113.212.69.69. Those are bulk range reports,
+# not per-host attack observations; a network address is not a mail sender.
+# So the 18% the DNSBL omits is the part of all.txt least worth having, and
+# dropping the local map rests on firmer ground than the superset claim did.
+#
+# Honesty note on the relay-chain argument above: it is theoretical on the
+# reference host. RBL_BLOCKLISTDE (from, 4.0) has fired; RECEIVED_BLOCKLISTDE
+# (received, 3.0) has never fired in the retained logs. The retirement does
+# not depend on it -- it rests on always-current, no map to rot, no
+# double-scoring, and the 18% being junk.
+feed_firehol {
+  type = "ip";
+  map = "/etc/rspamd/local.d/maps.d/firehol.inc";
+  symbol = "FEED_FIREHOL";
+  score = 3.0;
+  description = "Connecting IP on FireHOL level1 (attackers/malware) — score only";
+}
+feed_abuseipdb {
+  type = "ip";
+  map = "/etc/rspamd/local.d/maps.d/abuseipdb.inc";
+  symbol = "FEED_ABUSEIPDB";
+  score = 3.5;
+  description = "Connecting IP on AbuseIPDB (reported attack sources) — score only";
+}
+feed_et {
+  type = "ip";
+  map = "/etc/rspamd/local.d/maps.d/emergingthreats.inc";
+  symbol = "FEED_ET";
+  score = 2.5;
+  description = "Connecting IP on EmergingThreats compromised-ips — score only";
+}
+
+# AlienVault OTX subscribed-pulse URI hosts. Present unconditionally for the
+# same reason as the three feeds above: when ENABLE_OTX_URI=no (or no OTX API
+# key is present) the map file this points at is never created, rspamd logs
+# one benign line for it and the symbol never fires -- verified on a live
+# host. That is simpler and safer than making this rule's PRESENCE
+# conditional, which is what 70-otx.sh used to do by appending it to this
+# file at install time.
+#
+# That approach broke silently: render() (see lib/common.sh) overwrites its
+# destination unconditionally, so a `--only 40-rspamd` re-run wiped this rule
+# even though the map, the loader and the cron job were all untouched and
+# still running -- confirmed on a real Ubuntu 24.04 host: after enabling
+# otx_uri, a bare 40-rspamd re-run dropped it back to zero. 70-otx's own
+# grep-guard (`! grep -q '^otx_uri {'`) meant only a SUBSEQUENT `--only
+# 70-otx` would restore it; a normal full re-run does not touch 70-otx once
+# its done-marker is set, so the rule stayed gone. The weight in groups.conf
+# is untouched by this: 40-rspamd never renders that file, so 70-otx's append
+# there remains safe.
+#
+# Scoring convention differs from the three feed_* blocks above, on purpose:
+# this rule carries NO score here -- its weight (2.5) is set in groups.conf,
+# appended by 70-otx.sh, matching production exactly. Same split for the
+# urlhaus rule below (weight 4.0, appended by 72-feeds.sh) -- the feed_*
+# blocks score inline, otx_uri and urlhaus do not. Both conventions are
+# correct; check the reference host's actual per-symbol convention before
+# adding a new feed rather than assuming one pattern covers all of them.
+otx_uri {
+  type = "url";
+  map = "/etc/rspamd/local.d/maps.d/otx_uri_hosts.inc";
+  symbol = "FEED_OTX_URI";
+  description = "URL host in AlienVault OTX subscribed-pulse indicators";
+}
+
+# abuse.ch URLhaus malware-distribution URL hosts. Same class of gap as the
+# three feed_* blocks and otx_uri above, and the last instance of it: the
+# updater (load-urlhaus.sh) and its cron line (10 */6, keyed on
+# ABUSECH_API_KEY via set_source in 72-feeds.sh) existed, but this rule did
+# not exist ANYWHERE in the installer -- confirmed by grepping for
+# URLHAUS_MALWARE across templates/ and modules/ and finding nothing. So on
+# every installer-built host the map was downloaded every six hours and read
+# by nothing.
+#
+# Unconditional for the same reason as the others: with no ABUSECH_API_KEY the
+# map is never created, and an absent map is a benign no-op, not an error.
+#
+# Scored in groups.conf, not inline -- see 72-feeds.sh, which appends the
+# weight (4.0, matching production) right after set_source enables urlhaus.
+urlhaus {
+  type = "url";
+  map = "/etc/rspamd/local.d/maps.d/urlhaus_hosts.inc";
+  symbol = "URLHAUS_MALWARE";
+  description = "URL host on abuse.ch URLhaus malware-distribution list";
+}
+
+# ── Glob-included drop-in directories ────────────────────────────────────────
+# This file is render()ed WHOLE by 40-rspamd.sh, so any rule added directly to
+# it on a live host is destroyed by the next render. That is not hypothetical:
+# it is how the Blocklist.de feed silently died on the reference host on
+# 2026-08-15, and two reject-action rules (ioc_promoted_block,
+# dangerous_attachment_ext) plus the community-rules include were found sitting
+# on the same fuse on 2026-08-17.
+#
+# So anything not owned by this template lives in its own file under one of the
+# directories below and is picked up from here:
+#
+#   community-rules.d/  -- synced by update-rspamd-community-rules.sh (feed #9).
+#                          The include used to be hand-added once at rollout and
+#                          was NOT in this template, so a render would have
+#                          dropped 100+ live rule files.
+#   multimap.d/         -- everything else: operator rules, and app features
+#                          that add a multimap rule (IOC promotion, attachment
+#                          extension blocking). One file per owner.
+#
+# try=true keeps an empty/absent directory a benign no-op -- which also means
+# `rspamadm configtest` CANNOT tell you an include resolved. Verify a change
+# here by diffing `rspamadm configdump multimap` against a pre-change baseline.
+# A drop-in carries its rules at top level: multimap rules are not nested in a
+# parent block, so unlike local.d/rbl.d there is no wrapper to re-open.
+.include(glob=true,try=true,priority=1,duplicate=merge) "$LOCAL_CONFDIR/local.d/community-rules.d/*.conf"
+.include(glob=true,try=true,priority=1,duplicate=merge) "$LOCAL_CONFDIR/local.d/multimap.d/*.conf"

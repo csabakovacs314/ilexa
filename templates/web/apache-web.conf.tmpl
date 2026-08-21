@@ -1,0 +1,48 @@
+# mail-deploy — web routing + HTTPS enforcement.
+# Rendered into /etc/httpd/conf.d/. A single *:80 vhost that only redirects to
+# HTTPS (this is NOT a duplicate app vhost), plus per-app access rules.
+
+<VirtualHost *:80>
+    ServerName @@MAIL_FQDN@@
+
+    # The ACME http-01 challenge MUST stay on plain http and must not be
+    # redirected -- certbot --webroot drops its token under this path and
+    # Let's Encrypt fetches it over port 80. Without the RewriteCond below,
+    # the catch-all redirect swallows the challenge and every issuance and
+    # every RENEWAL fails.
+    Alias /.well-known/acme-challenge/ /var/www/html/.well-known/acme-challenge/
+    <Directory /var/www/html/.well-known/acme-challenge/>
+        Options -Indexes
+        AllowOverride None
+        Require all granted
+    </Directory>
+
+    RewriteEngine On
+    RewriteCond %{REQUEST_URI} !^/\.well-known/acme-challenge/
+    RewriteRule ^/?(.*) https://%{HTTP_HOST}/$1 [R=301,L]
+</VirtualHost>
+
+# --- PostfixAdmin: serve ONLY its public/ webroot -------------------------
+# The Alias remaps /postfixadmin to public/, so config.local.php (with the DB
+# password), setup.php, upgrade.php, VERSION, .git etc. in the package root are
+# never web-reachable. The deny on the package root is defense-in-depth.
+Alias /postfixadmin /var/www/html/postfixadmin/public
+<Directory /var/www/html/postfixadmin>
+    Require all denied
+</Directory>
+<Directory /var/www/html/postfixadmin/public>
+    Options -Indexes +FollowSymLinks
+    AllowOverride All
+    Require all granted
+</Directory>
+
+# --- Roundcube: deny config/temp/logs/SQL/bin under the docroot -----------
+<Directory /var/www/html/roundcube>
+    Options -Indexes +FollowSymLinks
+    AllowOverride All
+    Require all granted
+</Directory>
+<DirectoryMatch "^/var/www/html/roundcube/(config|temp|logs|SQL|bin|installer|\.git)">
+    Require all denied
+</DirectoryMatch>
+

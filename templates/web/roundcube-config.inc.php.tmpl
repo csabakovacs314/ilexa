@@ -1,0 +1,23 @@
+<?php
+// Roundcube main config — rendered by mail-deploy. Ownership root:apache 640.
+$config['db_dsnw'] = 'mysql://@@RC_DB_USER@@:@@RC_DB_PASSWORD@@@127.0.0.1/roundcube';
+$config['imap_host'] = 'ssl://localhost:993';
+$config['smtp_host'] = 'ssl://localhost:465';
+// The cert on :993/:465 is issued for the public FQDN, never for the literal
+// "localhost" this loopback connection dials -- PHP's default stream
+// verification rejects that CN mismatch and every login fails with an
+// opaque "Could not connect ... Unknown reason". Confirmed live: hawking's
+// hand-edited production config already carries this exact fix; a fresh
+// install from this template did not, and its Roundcube could not
+// authenticate anyone.
+$config['imap_conn_options'] = ['ssl' => ['verify_peer' => false, 'verify_peer_name' => false]];
+$config['smtp_conn_options'] = ['ssl' => ['verify_peer' => false, 'verify_peer_name' => false]];
+$config['smtp_user'] = '%u';
+$config['smtp_pass'] = '%p';
+$config['support_url'] = '';
+$config['product_name'] = 'Webmail';
+$config['des_key'] = '@@DES_KEY@@';
+$config['plugins'] = array(@@RC_PLUGINS@@);
+$config['default_host'] = 'ssl://localhost';
+$config['smtp_server'] = 'ssl://localhost';
+$config['enable_installer'] = false;

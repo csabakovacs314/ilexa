@@ -1,0 +1,182 @@
+#!/usr/bin/php
+<?php
+// ─────────────────────────────────────────────────────────────────
+//  archive-indexer.php — incrementally index @@ARCHIVE_USER@@
+//  into postfix.archive_index for the quarantine-admin Archive view.
+//  Runs as root via cron (cron-alert.sh). Incremental by max(uid).
+// ─────────────────────────────────────────────────────────────────
+const MAILBOX  = '@@ARCHIVE_USER@@';
+const CRED     = '/etc/quarantine-admin/indexer-db.php';
+const DOVEADM  = '/usr/bin/doveadm';
+// A message counts as spam for the archive badge if it reached the {Spam?} TAG
+// threshold — i.e. rspamd rewrite_subject in /etc/rspamd/local.d/actions.conf (6.0),
+// NOT the reject boundary. The X-Spamd-Result "True/False" flag tracks reject (15),
+// so relying on it would mis-file all delivered-tagged spam (6–15) as ham.
+const SPAM_TAG_SCORE = 6.0;
+
+// doveadm emits date.saved in the server's local time; parse in that zone so the
+// stored epoch is correct (PHP CLI would otherwise default to UTC → 2h skew).
+date_default_timezone_set('Europe/Budapest');
+
+$c   = require CRED;
+$pdo = new PDO("mysql:unix_socket={$c['socket']};dbname={$c['db']};charset=utf8mb4",
+               $c['user'], $c['pass'],
+               [PDO::ATTR_ERRMODE => PDO::ERRMODE_EXCEPTION]);
+
+$last  = (int) $pdo->query("SELECT COALESCE(MAX(uid),0) FROM archive_index")->fetchColumn();
+$range = ($last + 1) . ':*';
+
+// Optional range override, for re-indexing messages this table already has:
+//   archive-indexer.php --range=1:*     re-index everything
+//   archive-indexer.php --range=100:200 re-index one span
+// The INSERT below is ON DUPLICATE KEY UPDATE and names only the columns
+// derived from the message itself, so a re-index refreshes those and leaves
+// learned_as/learned_at -- an admin's own spam/ham teaching decisions --
+// untouched. Added when sender_ip/sender_cc were introduced and ~3.4k
+// existing rows needed backfilling; kept because any future column derived
+// from headers will need exactly the same one-off pass.
+foreach (array_slice($argv, 1) as $arg) {
+    if (preg_match('/^--range=(\d+:(?:\d+|\*))$/', $arg, $ma)) {
+        $range = $ma[1];
+    } elseif ($arg !== '') {
+        fwrite(STDERR, "archive-indexer: unknown argument '$arg' (expected --range=N:M)\n");
+        exit(2);
+    }
+}
+
+// -o mail_plugins=zlib → run WITHOUT fts: fts_autoindex=yes would otherwise
+// full-text-index the entire always_bcc firehose (RAM-OOM risk). The UI searches
+// the DB index, never IMAP body search, so FTS on the archive has no value.
+$cmd = DOVEADM . ' -o mail_plugins=zlib fetch -u ' . escapeshellarg(MAILBOX)
+     . ' "uid date.saved hdr" mailbox INBOX uid ' . escapeshellarg($range) . ' 2>/dev/null';
+$out = shell_exec($cmd);
+if ($out === null || trim($out) === '') { echo "archive-indexer: no new messages (last uid=$last)\n"; exit(0); }
+
+$ins = $pdo->prepare(
+    "INSERT INTO archive_index (uid,ts,from_addr,to_addr,subject,rspamd_score,is_spam,indexed_at,sender_ip,sender_cc)
+     VALUES (:uid,:ts,:frm,:to,:subj,:score,:spam,:iat,:sip,:scc)
+     ON DUPLICATE KEY UPDATE ts=VALUES(ts), from_addr=VALUES(from_addr), to_addr=VALUES(to_addr),
+       subject=VALUES(subject), rspamd_score=VALUES(rspamd_score), is_spam=VALUES(is_spam),
+       indexed_at=VALUES(indexed_at), sender_ip=VALUES(sender_ip), sender_cc=VALUES(sender_cc)");
+
+$now = time();
+$count = 0;
+// Records are separated by a form-feed line (\n\f\n).
+foreach (preg_split('/\n?\f\n?/', $out) as $rec) {
+    $rec = ltrim($rec, "\n");
+    if ($rec === '' || !preg_match('/^uid:\s*(\d+)/m', $rec, $mu)) continue;
+    $uid = (int) $mu[1];
+
+    $ts = $now;
+    if (preg_match('/^date\.saved:\s*(.+)$/m', $rec, $md)) {
+        $t = strtotime(trim($md[1]));
+        if ($t) $ts = $t;
+    }
+
+    // Header block follows "hdr:\n"; unfold continuation lines (leading space/tab).
+    $hdrs = '';
+    if (($p = strpos($rec, "\nhdr:")) !== false) {
+        $hdrs = ltrim(substr($rec, $p + 5), "\n");
+    }
+    $unf = preg_replace('/\n[ \t]+/', ' ', $hdrs);
+
+    $from = mb_substr(decode_hdr(hdr($unf, 'From')), 0, 320, 'UTF-8');
+    $to   = mb_substr(decode_hdr(hdr($unf, 'To')),   0, 320, 'UTF-8');
+    $subj = mb_substr(decode_hdr(hdr($unf, 'Subject')), 0, 512, 'UTF-8');
+    [$score, $spam] = verdict($unf);
+
+    // Deliberately from $hdrs (RAW), never $unf. Postfix's cleanup folds a
+    // message's first DATA line onto the topmost Received: header whenever
+    // that line starts with a space or TAB -- so an unfolded block can carry
+    // an attacker-authored bracketed literal after Postfix's own client-IP
+    // group, and "last bracket wins" would return it. See
+    // qa_topmost_received_client_ip() in the console's src/ioc.php for the
+    // full account; this is the same rule, and it must stay the same rule.
+    $sip = topmost_received_ip($hdrs);
+    $scc = $sip !== '' ? geoip_cc($sip) : '';
+
+    $ins->execute([
+        ':uid' => $uid, ':ts' => $ts, ':frm' => $from, ':to' => $to, ':subj' => $subj,
+        ':score' => $score, ':spam' => $spam, ':iat' => $now,
+        ':sip' => ($sip !== '' ? $sip : null), ':scc' => ($scc !== '' ? $scc : null),
+    ]);
+    $count++;
+}
+echo "archive-indexer: indexed $count new message(s) (prev max uid=$last)\n";
+
+// ── helpers ──────────────────────────────────────────────────────
+
+// Client IP from the TOPMOST Received: header, physical line 1 only.
+//
+// This is the indexer-side twin of qa_topmost_received_client_ip() in the
+// console's src/ioc.php and deliberately applies the identical rule: scan
+// ONLY the single physical line smtpd itself writes ("from %s (%s [%s])"),
+// require the anchored "from ... [ip])" shape in full, and require a public
+// address -- otherwise return '' rather than any sender-influenced
+// fallback. An empty result degrades to "no flag shown", which is safe; a
+// wrong one would attribute a message to a country it never came from.
+//
+// The FIRST Received: is ours: our own MTA prepends its record above
+// anything the sender supplied, and the only headers above it are locally
+// added (Return-Path, Delivered-To, Received-SPF, Authentication-Results).
+// "Received-SPF:" does not false-match -- the colon must follow "Received"
+// immediately.
+function topmost_received_ip(string $rawHdrs): string {
+    foreach (explode("\n", $rawHdrs) as $line) {
+        if (stripos($line, 'Received:') !== 0) continue;
+        $line1 = ltrim(rtrim(substr($line, 9), " \t\r"));
+        if (strlen($line1) > 600) return '';
+        if (!preg_match('/^\s*from .*\[(?:IPv6:)?([0-9a-fA-F:.]+)\]\)$/i', $line1, $m)) return '';
+        return is_public_ip($m[1]) ? $m[1] : '';
+    }
+    return '';
+}
+
+function is_public_ip(string $ip): bool {
+    return (bool) filter_var($ip, FILTER_VALIDATE_IP,
+        FILTER_FLAG_NO_PRIV_RANGE | FILTER_FLAG_NO_RES_RANGE);
+}
+
+// ISO country code for an IP, or '' when unknown.
+//
+// Uses the MaxMind GeoLite2 country DB via mmdblookup. Nothing on this host
+// auto-updates that file (MaxMind requires an account/licence key), so it
+// ages: treat a missing or stale answer as "unknown" and show no flag,
+// never a guess. escapeshellarg + the public-IP check above mean only a
+// validated literal ever reaches the shell.
+function geoip_cc(string $ip): string {
+    $db = '/usr/share/GeoIP/GeoLite2-Country.mmdb';
+    if (!is_readable($db)) return '';
+    $out = shell_exec('mmdblookup --file ' . escapeshellarg($db)
+                    . ' --ip ' . escapeshellarg($ip) . ' country iso_code 2>/dev/null');
+    return ($out !== null && preg_match('/"([A-Z]{2})"/', $out, $m)) ? $m[1] : '';
+}
+
+function hdr(string $unf, string $name): string {
+    return preg_match('/^' . preg_quote($name, '/') . ':\s*(.*)$/mi', $unf, $m) ? $m[1] : '';
+}
+// MIME-decode any header (From/To/Subject) only when an encoded-word is present,
+// else keep raw 8-bit (avoids iconv_mime_decode dropping bare UTF-8 bytes — the
+// AJÁNLAT→AJNLAT bug). Encoded display names like =?UTF-8?Q?...?= <addr> become "Náme <addr>".
+function decode_hdr(string $s): string {
+    $s = trim($s);
+    if ($s === '') return '';
+    if (strpos($s, '=?') !== false) {
+        $d = @iconv_mime_decode($s, ICONV_MIME_DECODE_CONTINUE_ON_ERROR, 'UTF-8');
+        if ($d !== false && $d !== '') return $d;
+    }
+    return $s;
+}
+// Prefer rspamd verdict; fall back to MailScanner during the transition.
+function verdict(string $unf): array {
+    if (preg_match('/^X-Spamd-Result:\s*\S+:\s*(True|False)\s*\[\s*(-?[\d.]+)/mi', $unf, $m)) {
+        // is_spam = reached the {Spam?} tag threshold, not the reject flag ($m[1]).
+        $score = (float) $m[2];
+        return [$score, $score >= SPAM_TAG_SCORE ? 1 : 0];
+    }
+    $score = null;
+    if (preg_match('/MailScanner-SpamCheck:.*?pont=(-?[\d.]+)/i', $unf, $m)) $score = (float) $m[1];
+    $spam = 0;
+    if (preg_match('/^X-Spam-Status:\s*(Yes|No)/mi', $unf, $m)) $spam = strcasecmp($m[1], 'Yes') === 0 ? 1 : 0;
+    return [$score, $spam];
+}

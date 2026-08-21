@@ -1,0 +1,13 @@
+<?php
+// Roundcube managesieve plugin — rendered by mail-deploy, only when
+// ENABLE_SIEVE=yes (26-sieve enables Dovecot's ManageSieve service on
+// 4190). host/port match that listener; the rest turns on the vacation
+// (out-of-office) UI, which is off by default in the plugin's own
+// config.inc.php.dist — confirmed live and working on hawking.
+$config['managesieve_port'] = 4190;
+$config['managesieve_host'] = 'localhost';
+$config['managesieve_script_name'] = 'roundcube';
+$config['managesieve_vacation'] = 1;
+$config['managesieve_vacation_addresses_init'] = true;
+$config['managesieve_vacation_from_init'] = true;
+$config['managesieve_notify'] = true;
