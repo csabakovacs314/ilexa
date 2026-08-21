@@ -94,19 +94,21 @@ EOF
 # executed end-to-end on any host until this session's Ubuntu verification.
 # Not Debian-specific -- the same single-line form would fail identically on
 # EL9/EL10, which ship the same Dovecot 2.3.x parser.
+# Only plugin{} settings and the imap-specific loader live here. The zlib
+# base plugin is loaded GLOBALLY in 00-mail-deploy-plugins.conf: a `protocol
+# imap { mail_plugins = $mail_plugins ... }` filter snapshots the global as
+# of its own parse position, so any global assignment in a later file never
+# reaches it -- which is exactly how fts/fts_xapian silently vanished from
+# imap's effective plugin list on every install (doveconf warned, exit code
+# stayed 0, and search just didn't work). Globals live in 00- (parses before
+# everything); protocol blocks only ever ADD protocol-specific plugins.
 write_file /etc/dovecot/conf.d/90-zlib.conf 644 <<'EOF'
 plugin {
   zlib_save = gz
   zlib_save_level = 6
 }
 protocol imap {
-  mail_plugins = $mail_plugins zlib imap_zlib
-}
-protocol lda {
-  mail_plugins = $mail_plugins zlib
-}
-protocol lmtp {
-  mail_plugins = $mail_plugins zlib
+  mail_plugins = $mail_plugins imap_zlib
 }
 EOF
 
@@ -151,15 +153,27 @@ elif [ "$ENABLE_FTS_XAPIAN" = yes ] && [ "$DRY_RUN" = 1 ]; then
 fi
 
 # --- assemble global mail_plugins based on what's enabled ---
+# Written to 00-mail-deploy-plugins.conf so it PARSES BEFORE every protocol
+# filter (90-zlib, 91-last-login, 99-zz-quota, 99-zz-sieve): protocol blocks
+# snapshot the global at their own parse position, so a global that sorts
+# after them is silently invisible inside them. The file is WRITTEN here,
+# mid-module (FTS_OK is only known after the build above) -- parse order is
+# decided by the filename, not the write time. `quota` is included on
+# 27-quota's behalf for the same reason: its own file sorts last, far too
+# late for a global.
 GLOBAL_PLUGINS="zlib"
 [ "$FTS_OK" = 1 ] && GLOBAL_PLUGINS="fts fts_xapian zlib"
+[ "${ENABLE_QUOTA:-yes}" = yes ] && GLOBAL_PLUGINS="$GLOBAL_PLUGINS quota"
+{
+  echo "# Global mail_plugins — must parse before every protocol filter; see 25-dovecot.sh"
+  echo "mail_plugins = $GLOBAL_PLUGINS"
+} | write_file /etc/dovecot/conf.d/00-mail-deploy-plugins.conf 644
 
 {
   echo "# mail-deploy consolidated overrides"
   echo "protocols = imap pop3"
   echo "mail_location = maildir:$MAIL_STORE/%d/%u"
   echo "mail_home = $MAIL_STORE/%d/%u"
-  echo "mail_plugins = $GLOBAL_PLUGINS"
   # The userdb hands out $MAIL_UID for every virtual mailbox, and Dovecot
   # refuses any uid below first_valid_uid -- which defaults to 500, well above
   # the postfix uid on BOTH platforms (89 on EL, 112 on the Ubuntu test host).

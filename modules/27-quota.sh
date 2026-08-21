@@ -14,20 +14,15 @@ fi
 
 write_file /etc/dovecot/conf.d/99-zz-quota.conf 644 <<'EOF'
 # mail-deploy: quota accounting (Maildir++) + SMTP-time quota-status policy.
-# `quota` must be listed in the SAME protocol-imap block as `imap_quota`, not
-# just in the top-level mail_plugins line above: 90-zlib.conf already opens a
-# `protocol imap { mail_plugins = ... }` filter, and per Dovecot's config
-# resolution a later *global* mail_plugins setting does not propagate into an
-# already-opened protocol filter (doveconf -n warns "Global setting
-# mail_plugins won't change the setting inside an earlier filter"). Without
-# `quota` here too, imap_quota fails to load on every install with quotas
-# enabled: "Couldn't load required plugin ...imap_quota_plugin.so: Plugin
-# quota must be loaded also" (confirmed live on the Ubuntu 24 test box,
-# 2026-08-21) -- doveconf -n still exits 0 since this is only a warning, so
-# the existing `doveconf -n || die` check below never caught it.
-mail_plugins = $mail_plugins quota
+# The `quota` base plugin is loaded GLOBALLY by 00-mail-deploy-plugins.conf
+# (written by 25-dovecot, which reads ENABLE_QUOTA for exactly this): this
+# file sorts last, far after 90-zlib's protocol filters have snapshotted the
+# global, so a global mail_plugins line HERE never reaches them and only
+# draws the "won't change the setting inside an earlier filter" warning.
+# Only the imap-specific loader is added here; imap inherits quota from the
+# 00- global, satisfying imap_quota's "Plugin quota must be loaded also".
 protocol imap {
-  mail_plugins = $mail_plugins quota imap_quota
+  mail_plugins = $mail_plugins imap_quota
 }
 plugin {
   quota = maildir:User quota
