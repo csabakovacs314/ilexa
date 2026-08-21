@@ -54,6 +54,26 @@ done
 # as the rbl.d and multimap.d splits.
 #
 # The milters (40-rspamd) do NOT need this: they are in the template already.
+# Postscreen DNSBL sites/weights are a STANDING CONFIG once installed:
+# /etc/ilexa/postscreen_dnsbl.conf (console-editable via the Rendszer card /
+# qa-postscreen-dnsbl.sh). On a re-run, the operator's list must survive this
+# module's full main.cf re-render -- same "don't destroy what you don't own"
+# rule as always_bcc below -- so when the conf exists, both values are derived
+# FROM it, overriding whatever deploy.sh computed from the answers.
+PSDNSBL_THRESHOLD=3
+if [ -s /etc/ilexa/postscreen_dnsbl.conf ]; then
+  _ps_sites=$(grep -vE '^\s*(#|threshold=|$)' /etc/ilexa/postscreen_dnsbl.conf | tr '\n' ' ' | sed 's/ $//')
+  _ps_thr=$(grep -m1 -oE '^threshold=[0-9]+' /etc/ilexa/postscreen_dnsbl.conf | cut -d= -f2)
+  if [ -n "$_ps_sites" ]; then
+    POSTSCREEN_DNSBL_SITES="$_ps_sites"
+    [ -n "$_ps_thr" ] && PSDNSBL_THRESHOLD="$_ps_thr"
+    log_info "postscreen DNSBL list taken from /etc/ilexa/postscreen_dnsbl.conf (console-managed)"
+  fi
+  unset _ps_sites _ps_thr
+fi
+setvar PSDNSBL_THRESHOLD "$PSDNSBL_THRESHOLD"
+setvar POSTSCREEN_DNSBL_SITES "$POSTSCREEN_DNSBL_SITES"
+
 _prev_always_bcc=""
 [ "$DRY_RUN" = 1 ] || _prev_always_bcc="$(postconf -h always_bcc 2>/dev/null)"
 
@@ -147,6 +167,21 @@ if [ "$DRY_RUN" != 1 ]; then
   postmap /etc/postfix/transport
   postfix set-permissions >/dev/null 2>&1 || true
   postfix check || die "postfix check failed"
+fi
+
+# Seed the standing config once so the console card has something to show
+# and later edits + re-renders share one source. Never overwritten here.
+if [ "$DRY_RUN" != 1 ] && [ ! -e /etc/ilexa/postscreen_dnsbl.conf ]; then
+  mkdir -p /etc/ilexa; chmod 755 /etc/ilexa
+  { echo "# postscreen DNSBL sites + weights. Managed by qa-postscreen-dnsbl.sh"
+    echo "# (Rendszer card in the ilexa console). Format: threshold=N, then one"
+    echo "# site[*weight] per line."
+    echo "threshold=$PSDNSBL_THRESHOLD"
+    for _s in $POSTSCREEN_DNSBL_SITES; do echo "$_s"; done
+  } > /etc/ilexa/postscreen_dnsbl.conf
+  chmod 644 /etc/ilexa/postscreen_dnsbl.conf
+  log_info "seeded /etc/ilexa/postscreen_dnsbl.conf ($(echo $POSTSCREEN_DNSBL_SITES | wc -w) sites, threshold $PSDNSBL_THRESHOLD)"
+  unset _s
 fi
 
 mark_done 20-postfix
