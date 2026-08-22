@@ -127,30 +127,47 @@ if [ "$DRY_RUN" != 1 ] && [ "${ENABLE_ILEXA:-yes}" = yes ]; then
     rm -f "$LOCALD/multimap.d/hu-brand-guard.conf"
   fi
 
-  # ---- Lua brand guard (HU_BRAND_DN_SPOOF) ---------------------------------
+  # ---- Lua brand guard (BRAND_* symbols) -----------------------------------
   # The fuzzy companion of the multimap pair: catches "0TP", Cyrillic "ОТР",
-  # accent tricks via transliteration + homoglyph fold + levenshtein <= 1.
-  # brand_definitions.json is STANDING CONFIG (console: Rendszer ->
+  # accent tricks via transliteration + homoglyph fold + levenshtein <= 1, and
+  # additionally scores brand claims in the Subject and the From localpart,
+  # plus lure language (any configured language) alongside them.
+  #
+  # lua.local.d/ is rspamd's OWN auto-loaded custom-rule directory (stock
+  # rules/rspamd.lua globs it) and already holds this project's hu_classify /
+  # hu_phish_scam_log rules -- the rule goes there rather than into a
+  # bespoke loader. First ship used an invented rspamd.local.lua + lua.d/
+  # pair; those are removed below so an upgraded host does not load the rule
+  # twice under two names.
+  #
+  # Both JSON data files are STANDING CONFIG (console: Rendszer ->
   # Márkavédelem, helper: qa-brand-guard.sh): seeded once, never re-rendered,
-  # so operator-added brands survive re-runs. The rule file and the loader ARE
-  # re-rendered every run.
-  install -d -m 755 /etc/rspamd/lua.d
-  install -m 644 "$MD_TEMPLATES/rspamd/brand_guard.lua" /etc/rspamd/lua.d/brand_guard.lua
-  if [ -f /etc/rspamd/rspamd.local.lua ] && ! grep -q 'lua.d' /etc/rspamd/rspamd.local.lua; then
-    backup /etc/rspamd/rspamd.local.lua
-    log_warn "existing rspamd.local.lua did not reference lua.d/ — backed up and replaced"
+  # so operator edits survive re-runs. The rule file IS re-rendered.
+  install -d -m 755 /etc/rspamd/lua.local.d
+  install -m 644 "$MD_TEMPLATES/rspamd/brand_guard.lua" /etc/rspamd/lua.local.d/brand_guard.lua
+  if [ -f /etc/rspamd/lua.d/brand_guard.lua ] || [ -f /etc/rspamd/rspamd.local.lua ]; then
+    rm -f /etc/rspamd/lua.d/brand_guard.lua /etc/rspamd/rspamd.local.lua
+    rmdir /etc/rspamd/lua.d 2>/dev/null || true
+    log_info "removed the superseded lua.d/ brand-guard loader"
   fi
-  install -m 644 "$MD_TEMPLATES/rspamd/rspamd.local.lua" /etc/rspamd/rspamd.local.lua
-  if [ ! -s "$LOCALD/brand_definitions.json" ]; then
-    install -m 644 "$MD_TEMPLATES/rspamd/brand_definitions.json" "$LOCALD/brand_definitions.json"
-    if [ "${ENABLE_HU_BRAND_GUARD:-yes}" != yes ]; then
-      python3 - <<'PYEOF' || log_warn "could not disable brand guard in brand_definitions.json"
+  _bg_seeded=0
+  for _bf in brand_definitions.json brand_lures.json; do
+    if [ ! -s "$LOCALD/$_bf" ]; then
+      install -m 644 "$MD_TEMPLATES/rspamd/$_bf" "$LOCALD/$_bf"
+      [ "$_bf" = brand_definitions.json ] && _bg_seeded=1
+    fi
+  done
+  # Only at SEED time: after that the JSON's own "enabled" key is the live
+  # switch (the console writes it), and a re-run must not stomp on it.
+  if [ "$_bg_seeded" = 1 ] && [ "${ENABLE_HU_BRAND_GUARD:-yes}" != yes ]; then
+    python3 - <<'PYEOF' || log_warn "could not disable brand guard in brand_definitions.json"
 import json
 p = '/etc/rspamd/local.d/brand_definitions.json'
-d = json.load(open(p)); d['enabled'] = False
-json.dump(d, open(p, 'w'), ensure_ascii=False, indent=2)
+d = json.load(open(p))
+if d.get('enabled') is not False:
+    d['enabled'] = False
+    json.dump(d, open(p, 'w'), ensure_ascii=False, indent=2)
 PYEOF
-    fi
   fi
   {
     echo "# Written by 40-rspamd — re-rendered on every run; local additions belong"
@@ -171,7 +188,7 @@ PYEOF
       echo "# HU_BRAND_SPOOF: when both fire it is the SAME evidence twice, so"
       echo "# this composite replaces their 5.0+2.5 stack with a single 5.5."
       echo "HU_BRAND_STRONG {"
-      echo "  expression = \"HU_BRAND_SPOOF & HU_BRAND_DN_SPOOF\";"
+      echo "  expression = \"HU_BRAND_SPOOF & BRAND_DN_SPOOF\";"
       echo "  score = 5.5;"
       echo "  description = \"Brand display-name spoof confirmed by both the exact and the fuzzy matcher\";"
       echo "}"

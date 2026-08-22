@@ -1,32 +1,39 @@
 -- brand_guard.lua — brand impersonation checks against a foreign From-domain:
---   HU_BRAND_DN_SPOOF   (2.5) From display-name claims a protected brand
---                             (OTP, Magyar Posta, PayPal, ...), fuzzily
---   HU_BRAND_ADDR_SPOOF (1.0) From localpart claims one (magyarposta@gmail.com)
---   HU_BRAND_SUBJ_SPOOF (1.0) Subject names one plainly (weak: webshops
---                             legitimately write "GLS", accountants "NAV")
---   HU_BRAND_SUBJ_OBFUS (3.0) Subject names one only after homoglyph/digit
---                             folding ("0TP", Cyrillic) — deliberate disguise
+--   BRAND_DN_SPOOF   (2.5) From display-name claims a protected brand
+--                          (OTP, Magyar Posta, PayPal, ...), fuzzily
+--   BRAND_ADDR_SPOOF (1.0) From localpart claims one (magyarposta@gmail.com)
+--   BRAND_SUBJ_SPOOF (1.0) Subject names one plainly (weak: webshops
+--                          legitimately write "GLS", accountants "NAV")
+--   BRAND_SUBJ_OBFUS (3.0) Subject names one only after homoglyph/digit
+--                          folding ("0TP", Cyrillic) — deliberate disguise
+--   BRAND_LURE       (2.0) ON TOP of any of the above: the text also uses
+--                          classic phishing lure language (any configured
+--                          language). Never fires on its own — "please
+--                          verify your account" is also what a genuine
+--                          password reset says.
 --
--- This is the fuzzy companion of the HU_BRAND_NAME/HU_BRAND_FROMDOM multimap
--- pair: where the multimap needs the literal brand string, this rule also
--- catches lookalikes — "0TP Bank", "Magyar  Pósta", Cyrillic "ОТР" — via
--- rspamd_util.transliterate + a digit-substitution fold + levenshtein <= 1.
--- Deliberately observational-grade scoring (2.5): the composite
--- HU_BRAND_STRONG in composites.conf merges it with the multimap verdict so
--- the same evidence is never double-counted.
+-- Language-neutral by construction: matching folds case, accents, homoglyphs
+-- and lookalike digits, so the same code covers Hungarian and English (and
+-- anything else added to the two data files). LANGUAGE lives in the data,
+-- never here.
 --
--- Brand definitions: /etc/rspamd/local.d/brand_definitions.json, managed by
--- qa-brand-guard.sh (ilexa console, Rendszer → Márkavédelem card). Schema:
---   { "enabled": true,
---     "brands": [ { "id": "otp", "name": "OTP Bank",
---                   "variants": ["otp", "otp bank", "=wise-style-exact"],
---                   "domains":  ["otpbank.hu", ...] } ] }
+-- Data files (both standing config, seeded once by the installer and then
+-- managed from the ilexa console — Rendszer → Márkavédelem — or by
+-- qa-brand-guard.sh; edits survive re-runs):
+--   /etc/rspamd/local.d/brand_definitions.json   brands, name variants, real domains
+--   /etc/rspamd/local.d/brand_lures.json         lure phrases per language
+--
 -- A variant starting with "=" only matches the WHOLE display name (for brand
--- names that are also ordinary words, e.g. "wise"); all others also match as
--- a word inside the display name and at edit distance 1.
+-- names that are also ordinary words, e.g. "wise", "visa", "apple"); such
+-- variants take no part in Subject/localpart matching at all.
 --
 -- Failure behaviour: any problem with the definitions file logs one error
--- and leaves the symbol unregistered — mail flow is never affected.
+-- and leaves the symbols unregistered — mail flow is never affected. A
+-- missing or broken lures file only disables BRAND_LURE.
+--
+-- NOTE: rspamd executes this once at worker START. A `systemctl reload` does
+-- NOT re-run it; changing this file or either data file needs a restart
+-- (which is what qa-brand-guard.sh apply does).
 
 if confighelp then return end
 
@@ -34,10 +41,11 @@ local rspamd_util   = require "rspamd_util"
 local rspamd_logger = require "rspamd_logger"
 local ucl           = require "ucl"
 
-local DEFS = '/etc/rspamd/local.d/brand_definitions.json'
+local DEFS  = '/etc/rspamd/local.d/brand_definitions.json'
+local LURES = '/etc/rspamd/local.d/brand_lures.json'
 
-local function load_defs()
-  local f = io.open(DEFS, 'r')
+local function load_json(path)
+  local f = io.open(path, 'r')
   if not f then return nil, 'missing' end
   local raw = f:read('*a'); f:close()
   if not raw or #raw == 0 then return nil, 'empty' end
@@ -71,9 +79,21 @@ local homoglyphs = {
   ['Χ']='x',
 }
 
+-- Plain fold: what an honest writer could have typed (accents and case fold —
+-- "MÁV" is a mention, not obfuscation). Also the fold used for lure phrases.
+local function normalize_plain(s)
+  -- transliterate returns an rspamd_text userdata (no :gsub) — force a string
+  s = tostring(rspamd_util.transliterate(s) or '')
+  s = s:lower()
+  s = s:gsub('[^a-z0-9]+', ' ')
+  s = s:gsub('^%s+', ''):gsub('%s+$', '')
+  return s
+end
+
+-- Full fold: additionally undoes homoglyph and lookalike-digit disguises.
+-- Text that names a brand only under this fold was deliberately disguised.
 local function normalize(s)
   for k, v in pairs(homoglyphs) do s = s:gsub(k, v) end
-  -- transliterate returns an rspamd_text userdata (no :gsub) — force a string
   s = tostring(rspamd_util.transliterate(s) or '')
   s = s:lower()
   s = s:gsub('[013457@$]', subst)
@@ -87,7 +107,7 @@ local function lev_le1(a, b)
   return rspamd_util.levenshtein_distance(a, b) <= 1
 end
 
-local defs, derr = load_defs()
+local defs, derr = load_json(DEFS)
 if not defs then
   if derr ~= 'missing' then
     rspamd_logger.errx(rspamd_config, 'brand_guard: cannot parse %s: %s', DEFS, derr)
@@ -120,16 +140,25 @@ end
 
 if #brands == 0 then return end
 
--- Like normalize() but WITHOUT the homoglyph and digit folds: what an honest
--- writer could plausibly have typed (accents and case still fold — "MÁV" is
--- a plain mention, not obfuscation). Text that names a brand only under
--- normalize() but not under normalize_plain() was deliberately disguised.
-local function normalize_plain(s)
-  s = tostring(rspamd_util.transliterate(s) or '')
-  s = s:lower()
-  s = s:gsub('[^a-z0-9]+', ' ')
-  s = s:gsub('^%s+', ''):gsub('%s+$', '')
-  return s
+-- Lure phrases: flat { normalized_phrase, lang } list. Optional feature.
+local lures = {}
+do
+  local ldata, lerr = load_json(LURES)
+  if not ldata then
+    if lerr ~= 'missing' then
+      rspamd_logger.errx(rspamd_config, 'brand_guard: cannot parse %s: %s', LURES, lerr)
+    end
+  elseif ldata.enabled ~= false then
+    for lang, list in pairs(ldata.phrases or {}) do
+      for _, p in ipairs(list or {}) do
+        local pn = normalize_plain(tostring(p))
+        -- Short phrases match far too much prose to be evidence of anything.
+        if #pn >= 8 then
+          lures[#lures + 1] = { p = pn, lang = tostring(lang) }
+        end
+      end
+    end
+  end
 end
 
 -- Word-containment of a non-exact variant in normalized text.
@@ -177,6 +206,30 @@ local function check_display_name(dn_norm)
   return nil
 end
 
+-- Subject + the head of each text part, plainly folded. Bounded on purpose:
+-- lure phrases live in the opening pitch, and scanning whole newsletters
+-- would cost CPU for no additional signal.
+local function lure_hit(task, subj)
+  if #lures == 0 then return nil end
+  local chunks = {}
+  if subj then chunks[#chunks + 1] = subj end
+  for _, part in ipairs(task:get_text_parts() or {}) do
+    local c = part:get_content()
+    if c then
+      c = tostring(c)
+      chunks[#chunks + 1] = (#c > 4000) and c:sub(1, 4000) or c
+    end
+    if #chunks >= 3 then break end
+  end
+  for _, chunk in ipairs(chunks) do
+    local norm = normalize_plain(chunk)
+    for _, l in ipairs(lures) do
+      if norm:find(l.p, 1, true) then return l end
+    end
+  end
+  return nil
+end
+
 local function brand_guard_cb(task)
   -- Authenticated submissions are our own users; the spoof economics only
   -- exist for inbound mail.
@@ -192,6 +245,8 @@ local function brand_guard_cb(task)
   -- domains, e.g. a bank newsletter naming another bank) is never a spoof.
   if all_domains[fdom] or all_domains[tld] then return end
 
+  local impersonation = false
+
   -- 1. Display name: fuzzy (containment + levenshtein), the strongest claim.
   local dn = from[1].name
   if dn and #dn >= 2 then
@@ -199,7 +254,8 @@ local function brand_guard_cb(task)
     if #dn_norm >= 3 and #dn_norm <= 120 then
       local b, v = check_display_name(dn_norm)
       if b then
-        task:insert_result('HU_BRAND_DN_SPOOF', 1.0,
+        impersonation = true
+        task:insert_result('BRAND_DN_SPOOF', 1.0,
           string.format('%s:%s:%s', b.id, v, tld))
       end
     end
@@ -210,7 +266,8 @@ local function brand_guard_cb(task)
   if lp and #lp >= 3 and #lp <= 100 then
     local b, v = contains_variant(normalize(lp))
     if b then
-      task:insert_result('HU_BRAND_ADDR_SPOOF', 1.0,
+      impersonation = true
+      task:insert_result('BRAND_ADDR_SPOOF', 1.0,
         string.format('%s:%s:%s', b.id, v, tld))
     end
   end
@@ -226,33 +283,44 @@ local function brand_guard_cb(task)
     if #full >= 3 then
       local b, v = contains_variant(full)
       if b then
+        impersonation = true
         local plain = normalize_plain(subj)
         local sym = (' ' .. plain .. ' '):find(' ' .. v .. ' ', 1, true)
-                    and 'HU_BRAND_SUBJ_SPOOF' or 'HU_BRAND_SUBJ_OBFUS'
+                    and 'BRAND_SUBJ_SPOOF' or 'BRAND_SUBJ_OBFUS'
         task:insert_result(sym, 1.0, string.format('%s:%s:%s', b.id, v, tld))
       end
+    end
+  end
+
+  -- 4. Lure language, ONLY alongside an impersonation hit above.
+  if impersonation then
+    local l = lure_hit(task, subj)
+    if l then
+      task:insert_result('BRAND_LURE', 1.0, string.format('%s:%s', l.lang, l.p))
     end
   end
 end
 
 local parent_id = rspamd_config:register_symbol({
-  name = 'HU_BRAND_GUARD',
+  name = 'BRAND_GUARD',
   type = 'callback',
   callback = brand_guard_cb,
   score = 0.0,
-  description = 'Brand impersonation checks (display name, From localpart, Subject)',
+  description = 'Brand impersonation checks (display name, From localpart, Subject, lure language)',
   group = 'phishing',
 })
 
 for _, sym in ipairs({
-  { name = 'HU_BRAND_DN_SPOOF', score = 2.5,
+  { name = 'BRAND_DN_SPOOF', score = 2.5,
     description = 'From display-name resembles a protected brand but the From-domain is not that brand' },
-  { name = 'HU_BRAND_ADDR_SPOOF', score = 1.0,
+  { name = 'BRAND_ADDR_SPOOF', score = 1.0,
     description = 'From-address localpart claims a protected brand from a foreign domain' },
-  { name = 'HU_BRAND_SUBJ_SPOOF', score = 1.0,
+  { name = 'BRAND_SUBJ_SPOOF', score = 1.0,
     description = 'Subject names a protected brand but the sender is a foreign domain' },
-  { name = 'HU_BRAND_SUBJ_OBFUS', score = 3.0,
+  { name = 'BRAND_SUBJ_OBFUS', score = 3.0,
     description = 'Subject names a protected brand in disguised form (homoglyph/digit tricks) from a foreign domain' },
+  { name = 'BRAND_LURE', score = 2.0,
+    description = 'Brand-impersonating message also uses classic phishing lure language' },
 }) do
   rspamd_config:register_symbol({
     name = sym.name, type = 'virtual', parent = parent_id,
