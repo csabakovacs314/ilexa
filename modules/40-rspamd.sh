@@ -338,6 +338,25 @@ if [ "$DRY_RUN" != 1 ]; then
 #    is_profile_compatible() in rspamd's lualib/plugins/neural.lua). The goal
 #    is just to get over the line once.
 #
+#
+# 3. max_trains = 250, lowered again 2026-08-22 after measuring what the
+#    archive can actually yield. Training vectors live in a redis SET, so
+#    IDENTICAL symbol vectors collapse: 341 archived spam messages produced
+#    only 148 distinct vectors, because spam arrives in campaigns that all
+#    score the same way (verified by scanning one message twice -- the set
+#    grew by one, not two). The effective corpus is DISTINCT VECTORS, not
+#    messages, and no amount of replaying changes that.
+#
+#    200 was then chosen empirically, not by taste. At 250/bias 0.5 the first
+#    ANN trained on 598 ham vs 148 spam and rspamd REJECTED it: "degenerate
+#    model: constant or single-class output ... predicted spam=0 ham=746 of
+#    746" -- the classic collapse of a 4:1 imbalanced set with a small
+#    minority class. The ham set was trimmed to ~248 to bring the ratio to
+#    1.7:1, and the threshold follows the class the corpus can actually fill:
+#    200 needs 100 of the smaller class, comfortably under the ~148 ceiling.
+#    Expect a thin first model; live traffic keeps adding distinct vectors and
+#    the ANN retrains as it goes.
+#
 # Progress is snapshotted daily by qa-neural-snapshot.sh ->
 # /var/log/qa-neural-snapshots.log, so a repeat stall is visible instead of
 # silent.
@@ -345,7 +364,7 @@ enabled = true;
 rules {
   "default" {
     train {
-      max_trains = 500;
+      max_trains = 200;
       max_usages = 20;
       max_iterations = 25;
       spam_score = 6;
