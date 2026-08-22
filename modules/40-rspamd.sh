@@ -107,6 +107,18 @@ if [ "$DRY_RUN" != 1 ] && [ "${ENABLE_ILEXA:-yes}" = yes ]; then
   done
   render "$MD_TEMPLATES/rspamd/multimap.conf.tmpl" "$LOCALD/multimap.conf"
 
+fi
+
+# ---- brand-impersonation guard + phishing/whitelist composites -------------
+#
+# NOT gated on ENABLE_ILEXA. None of this needs the console: the maps, the Lua
+# rule and the composites are pure rspamd configuration. Having it inside that
+# gate meant a console-less install silently got no brand guard AND no
+# PHISH_ON_TRUSTED -- the whitelist-stripping composite this block's own
+# comment calls "universal logic, installed unconditionally" and GUIDE.md says
+# "installs regardless". An operator who set ENABLE_ILEXA=no and
+# ENABLE_HU_BRAND_GUARD=yes had their explicit yes ignored without a word.
+if [ "$DRY_RUN" != 1 ]; then
   # ---- brand-impersonation guard + phishing/whitelist composites -----------
   # Born from a live incident (2026-08-22): a compromised university account
   # sent OTP-Bank/MagyarPosta phishing that every reputation layer voted ham
@@ -119,12 +131,23 @@ if [ "$DRY_RUN" != 1 ] && [ "${ENABLE_ILEXA:-yes}" = yes ]; then
   #   PHISH_ON_TRUSTED composite (+3, strips whitelist weights when rspamd's
   #     own PHISHING symbol fires through whitelisted infra) -- universal
   #     logic, installed unconditionally.
+  # The MULTIMAP half needs multimap.conf, which is rendered only for console
+  # installs (it also carries ilexa's block/allow maps and the glob includes),
+  # so it is installed only when that directory really exists. The Lua half and
+  # the composites below have no such dependency and always ship -- which is
+  # the point of moving this section out of the ENABLE_ILEXA gate.
+  _bg_multimap=0
   install -m 644 "$MD_TEMPLATES/rspamd/hu_brand_names.re"    "$LOCALD/maps.d/hu_brand_names.re"
   install -m 644 "$MD_TEMPLATES/rspamd/hu_brand_domains.inc" "$LOCALD/maps.d/hu_brand_domains.inc"
-  if [ "${ENABLE_HU_BRAND_GUARD:-yes}" = yes ]; then
-    install -m 644 "$MD_TEMPLATES/rspamd/hu-brand-guard-multimap.conf" "$LOCALD/multimap.d/hu-brand-guard.conf"
-  else
-    rm -f "$LOCALD/multimap.d/hu-brand-guard.conf"
+  if [ -d "$LOCALD/multimap.d" ]; then
+    if [ "${ENABLE_HU_BRAND_GUARD:-yes}" = yes ]; then
+      install -m 644 "$MD_TEMPLATES/rspamd/hu-brand-guard-multimap.conf" "$LOCALD/multimap.d/hu-brand-guard.conf"
+      _bg_multimap=1
+    else
+      rm -f "$LOCALD/multimap.d/hu-brand-guard.conf"
+    fi
+  elif [ "${ENABLE_HU_BRAND_GUARD:-yes}" = yes ]; then
+    log_info "no multimap.d (console not installed) — brand guard runs as the Lua rule only"
   fi
 
   # ---- Lua brand guard (BRAND_* symbols) -----------------------------------
@@ -187,7 +210,17 @@ if [ "$DRY_RUN" != 1 ] && [ "${ENABLE_ILEXA:-yes}" = yes ]; then
   # sector was exempt from all five BRAND_* checks. Removing exactly that one
   # string, with a backup, is narrower than leaving installed hosts unprotected.
   # nav.gov.hu (kept) covers NAV, and the Lua rule compares the full domain.
+  # python3 is NOT guaranteed at this point in the run (58-report-learn installs
+  # it eighteen modules later), so the migration must announce itself rather
+  # than fail into silence on a minimal image.
   if [ -s "$LOCALD/brand_definitions.json" ] \
+     && grep -q '"gov\.hu"' "$LOCALD/brand_definitions.json" \
+     && ! command -v python3 >/dev/null 2>&1; then
+    log_warn "brand_definitions.json still contains the bare gov.hu whitelist entry and python3 is not installed"
+    log_warn "  it exempts EVERY *.gov.hu sender from the brand checks — remove that one line by hand"
+  fi
+  if [ -s "$LOCALD/brand_definitions.json" ] \
+     && command -v python3 >/dev/null 2>&1 \
      && grep -q '"gov\.hu"' "$LOCALD/brand_definitions.json"; then
     backup "$LOCALD/brand_definitions.json"
     if python3 - <<'PYMIG'
@@ -208,17 +241,32 @@ PYMIG
     fi
   fi
 
-  # Only at SEED time: after that the JSON's own "enabled" key is the live
-  # switch (the console writes it), and a re-run must not stomp on it.
-  if [ "$_bg_seeded" = 1 ] && [ "${ENABLE_HU_BRAND_GUARD:-yes}" != yes ]; then
-    python3 - <<'PYEOF' || log_warn "could not disable brand guard in brand_definitions.json"
-import json
-p = '/etc/rspamd/local.d/brand_definitions.json'
-d = json.load(open(p))
-if d.get('enabled') is not False:
-    d['enabled'] = False
-    json.dump(d, open(p, 'w'), ensure_ascii=False, indent=2)
-PYEOF
+  # The toggle now works on EVERY run, and needs no python3.
+  #
+  # Two bugs are fixed here. It used to apply only when the JSON was freshly
+  # seeded, so re-running with ENABLE_HU_BRAND_GUARD=no on an existing host
+  # removed the multimap and the composites while the Lua layer kept scoring --
+  # the operator asked for the guard off and got a silently re-weighted one.
+  # And the disable itself shelled out to python3, which NO earlier module
+  # installs (58-report-learn is eighteen modules later), so on a minimal image
+  # it failed into a warning and left the guard fully enabled.
+  #
+  # Asymmetric ON PURPOSE. An explicit "no" is a decision, so it is enforced on
+  # every run. "yes" is merely the default, so it is applied only at seed time
+  # -- otherwise a re-run would silently re-enable a guard the operator had
+  # turned off in the console, which is the standing-config rule this toolkit
+  # follows everywhere else.
+  if [ "${ENABLE_HU_BRAND_GUARD:-yes}" != yes ] && [ -s "$LOCALD/brand_definitions.json" ]; then
+    if grep -qE '"enabled"[[:space:]]*:[[:space:]]*true' "$LOCALD/brand_definitions.json"; then
+      backup "$LOCALD/brand_definitions.json"
+      sed -i -E 's/"enabled"[[:space:]]*:[[:space:]]*true/"enabled": false/' \
+        "$LOCALD/brand_definitions.json"
+      if grep -qE '"enabled"[[:space:]]*:[[:space:]]*false' "$LOCALD/brand_definitions.json"; then
+        log_info "brand guard disabled in brand_definitions.json (ENABLE_HU_BRAND_GUARD=no)"
+      else
+        log_warn "could not disable the brand guard in brand_definitions.json — set \"enabled\": false by hand"
+      fi
+    fi
   fi
   {
     echo "# Written by 40-rspamd — re-rendered on every run; local additions belong"
@@ -228,7 +276,10 @@ PYEOF
     echo "  score = 3.0;"
     echo "  description = \"Phishing content sent through whitelisted infrastructure\";"
     echo "}"
-    if [ "${ENABLE_HU_BRAND_GUARD:-yes}" = yes ]; then
+    # HU_BRAND_SPOOF/STRONG name HU_BRAND_NAME and HU_BRAND_FROMDOM, which only
+    # the multimap defines -- writing them without it would leave composites
+    # referencing symbols that do not exist.
+    if [ "${ENABLE_HU_BRAND_GUARD:-yes}" = yes ] && [ "${_bg_multimap:-0}" = 1 ]; then
       echo "HU_BRAND_SPOOF {"
       echo "  expression = \"HU_BRAND_NAME & !HU_BRAND_FROMDOM\";"
       echo "  score = 5.0;"
