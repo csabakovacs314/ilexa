@@ -9,7 +9,6 @@
 /\bErste\b/i
 /\bRaiffeisen\b/i
 /\bRevolut\b/i
-/\bWise\b/i
 /\bFoxpost\b/i
 /\bGLS\b/i
 /\bDPD\b/i

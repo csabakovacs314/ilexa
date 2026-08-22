@@ -126,6 +126,32 @@ if [ "$DRY_RUN" != 1 ] && [ "${ENABLE_ILEXA:-yes}" = yes ]; then
   else
     rm -f "$LOCALD/multimap.d/hu-brand-guard.conf"
   fi
+
+  # ---- Lua brand guard (HU_BRAND_DN_SPOOF) ---------------------------------
+  # The fuzzy companion of the multimap pair: catches "0TP", Cyrillic "ОТР",
+  # accent tricks via transliteration + homoglyph fold + levenshtein <= 1.
+  # brand_definitions.json is STANDING CONFIG (console: Rendszer ->
+  # Márkavédelem, helper: qa-brand-guard.sh): seeded once, never re-rendered,
+  # so operator-added brands survive re-runs. The rule file and the loader ARE
+  # re-rendered every run.
+  install -d -m 755 /etc/rspamd/lua.d
+  install -m 644 "$MD_TEMPLATES/rspamd/brand_guard.lua" /etc/rspamd/lua.d/brand_guard.lua
+  if [ -f /etc/rspamd/rspamd.local.lua ] && ! grep -q 'lua.d' /etc/rspamd/rspamd.local.lua; then
+    backup /etc/rspamd/rspamd.local.lua
+    log_warn "existing rspamd.local.lua did not reference lua.d/ — backed up and replaced"
+  fi
+  install -m 644 "$MD_TEMPLATES/rspamd/rspamd.local.lua" /etc/rspamd/rspamd.local.lua
+  if [ ! -s "$LOCALD/brand_definitions.json" ]; then
+    install -m 644 "$MD_TEMPLATES/rspamd/brand_definitions.json" "$LOCALD/brand_definitions.json"
+    if [ "${ENABLE_HU_BRAND_GUARD:-yes}" != yes ]; then
+      python3 - <<'PYEOF' || log_warn "could not disable brand guard in brand_definitions.json"
+import json
+p = '/etc/rspamd/local.d/brand_definitions.json'
+d = json.load(open(p)); d['enabled'] = False
+json.dump(d, open(p, 'w'), ensure_ascii=False, indent=2)
+PYEOF
+    fi
+  fi
   {
     echo "# Written by 40-rspamd — re-rendered on every run; local additions belong"
     echo "# in a separate file, not here."
@@ -140,6 +166,14 @@ if [ "$DRY_RUN" != 1 ] && [ "${ENABLE_ILEXA:-yes}" = yes ]; then
       echo "  score = 5.0;"
       echo "  description = \"From claims a Hungarian brand from a foreign domain\";"
       echo "  policy = \"leave\";"
+      echo "}"
+      echo "# The Lua brand guard (HU_BRAND_DN_SPOOF) is a superset of"
+      echo "# HU_BRAND_SPOOF: when both fire it is the SAME evidence twice, so"
+      echo "# this composite replaces their 5.0+2.5 stack with a single 5.5."
+      echo "HU_BRAND_STRONG {"
+      echo "  expression = \"HU_BRAND_SPOOF & HU_BRAND_DN_SPOOF\";"
+      echo "  score = 5.5;"
+      echo "  description = \"Brand display-name spoof confirmed by both the exact and the fuzzy matcher\";"
       echo "}"
     fi
   } | write_file "$LOCALD/composites.conf" 644
@@ -697,7 +731,11 @@ fi
 if [ "$DRY_RUN" != 1 ]; then
   rspamadm configtest >/dev/null 2>&1 && log_info "rspamadm configtest OK" \
     || log_warn "rspamadm configtest reported problems — check $LOCALD"
-  svc_reload rspamd
+  # restart, not reload: rspamd.local.lua and the lua.d/ rules it loads are
+  # executed once at worker start; a reload demonstrably does not re-run them
+  # (verified on the reference host — HU_BRAND_DN_SPOOF only registered after
+  # a full restart).
+  svc_restart rspamd
   svc_reload postfix
 fi
 

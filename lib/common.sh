@@ -483,6 +483,13 @@ svc_reload() { # unit
   systemctl reload "$1" 2>/dev/null || systemctl restart "$1"
 }
 
+svc_restart() { # unit — a HARD restart, for daemons whose reload does not
+  # re-execute everything (rspamd's rspamd.local.lua/lua.d rules run once at
+  # worker start; svc_reload's reload path would silently skip them).
+  if [ "$DRY_RUN" = 1 ]; then log_info "[dry-run] systemctl restart $1"; return 0; fi
+  systemctl restart "$1"
+}
+
 # write_file PATH MODE [OWNER]  — content on stdin; backs up existing.
 write_file() {
   local path="$1" mode="$2" owner="${3:-}"
