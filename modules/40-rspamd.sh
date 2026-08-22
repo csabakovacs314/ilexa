@@ -286,9 +286,18 @@ fi
 # neural: a small ANN that learns the PATTERN of all other symbols rather than
 # any single one, so it catches mail that is individually unremarkable but
 # collectively looks like the spam this server actually receives. It emits
-# nothing until it has trained on max_trains samples -- on the reference host
-# it stood at 930 ham / 493 spam of 1000 after ten days, i.e. genuinely working
-# and simply not mature yet. Score-only and modest by design.
+# nothing until it has trained.
+#
+# CORRECTION 2026-08-22: this comment used to read "930 ham / 493 spam of 1000
+# after ten days, i.e. genuinely working and simply not mature yet". That was
+# wrong. Two weeks later the reference host had 1001 ham (capped) / 568 spam
+# and had still never trained a single ANN, because rspamd's default balanced
+# mode requires BOTH classes at max_trains -- and spam vectors arrive far
+# slower than ham. Worse, the training-vector redis key embeds a digest of the
+# symbol list, so every symbol added to the config silently reset the counts
+# to zero. Fixed below with classes_bias (tolerate real-world class imbalance)
+# and a lower max_trains (reachable between symbol-set changes). Details and
+# the arithmetic are in the generated neural.conf header.
 #
 # local fuzzy: a private fuzzy_storage worker holding hashes of mail YOUR users
 # and admins reported, so a near-duplicate of something already reported here
@@ -304,17 +313,44 @@ fi
 # redis keys after ten days of uptime. Shipping it would spread a no-op.
 if [ "$DRY_RUN" != 1 ]; then
   write_file "$LOCALD/neural.conf" 0644 root:root <<'EOF'
-# Neural classifier. Dormant until it has trained on max_trains samples, then
-# scores based on the learned combination of every other symbol.
+# Neural classifier. Dormant until it has trained, then scores based on the
+# learned combination of every other symbol.
+#
+# Two settings below are deliberately NOT rspamd's defaults, both fixing a
+# silent never-trains stall diagnosed on the reference host 2026-08-22:
+#
+# 1. classes_bias = 0.5. In the default balanced mode (bias 0.0) training
+#    needs BOTH classes at max_trains. Ham fills from ordinary mail; spam
+#    vectors arrive much slower, so the ham set caps out and expires while
+#    spam is still climbing. 0.5 tolerates up to a 2:1 imbalance, which is
+#    what a real mail server actually produces.
+#
+# 2. max_trains = 500, not 1000. The training-vector redis key embeds a
+#    digest of the SYMBOL LIST (rn_<rule>_<set>_<digest8>_<ver>_*_set), so
+#    ANY change to the enabled symbol set starts a brand-new, empty training
+#    set -- observed live: adding five symbols reset 1001 ham / 568 spam to
+#    zero. A target that takes months is therefore never reached on a server
+#    that gains symbols regularly. 500 (needing 250 of the smaller class) is
+#    reachable in a few weeks and is still a meaningful sample.
+#
+#    Churn only resets ACCUMULATING vectors: once an ANN is trained it keeps
+#    being loaded through later symbol drift (up to 30% distance, see
+#    is_profile_compatible() in rspamd's lualib/plugins/neural.lua). The goal
+#    is just to get over the line once.
+#
+# Progress is snapshotted daily by qa-neural-snapshot.sh ->
+# /var/log/qa-neural-snapshots.log, so a repeat stall is visible instead of
+# silent.
 enabled = true;
 rules {
   "default" {
     train {
-      max_trains = 1000;
+      max_trains = 500;
       max_usages = 20;
       max_iterations = 25;
       spam_score = 6;
       ham_score = -1;
+      classes_bias = 0.5;
     }
     symbol_spam = "NEURAL_SPAM";
     symbol_ham  = "NEURAL_HAM";

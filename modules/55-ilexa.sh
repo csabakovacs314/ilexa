@@ -464,6 +464,18 @@ write_file /etc/cron.d/qa-ioc-expire 0644 root:root <<EOF
 0 3 * * * ${WEB_USER} /usr/local/sbin/qa-ioc-expire.php >> /var/log/quarantine-admin/qa-ioc-expire.log 2>&1
 EOF
 
+# rspamd neural training progress. Runs as ROOT (reads redis directly, no
+# message content). Exists because the neural module fails SILENTLY: when it
+# never reaches its training threshold -- or when a symbol-set change resets
+# its vectors, which happens whenever this project ships a new symbol -- the
+# only visible effect is that NEURAL_* never fires, which looks identical to
+# "installed and quiet". The reference host sat that way for two weeks. See
+# the header of local.d/neural.conf.
+write_file /etc/cron.d/qa-neural-snapshot 0644 root:root <<'EOF'
+MAILTO=""
+41 5 * * * root /usr/bin/cron-alert.sh qa-neural-snapshot /usr/local/sbin/qa-neural-snapshot.sh
+EOF
+
 # SIEM export health check -- catches a config that "looks enabled" but has
 # silently stopped delivering anything (a stuck omfwd action can sit in
 # resume/retry backoff, or in some failure modes never even flip that flag,
