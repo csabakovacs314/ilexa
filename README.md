@@ -15,6 +15,43 @@ managed blocklist/reputation feeds with real enable/disable lifecycle,
 role-based access, audit logging with failed-login tracking, and optional
 SIEM export.
 
+### Brand-impersonation guard
+
+Deployments also get a **brand-impersonation guard** — an rspamd rule that
+scores mail claiming a brand it does not send from. It exists because of a
+failure mode reputation filtering handles poorly: phishing sent through a
+*compromised legitimate account* passes SPF, DKIM, DMARC and IP reputation,
+because those describe the server, not the human at the keyboard. A real
+OTP-Bank/Magyar-Posta campaign arriving cleanly as ham from a hijacked
+university mailbox is what prompted it.
+
+The category is not new — commercial mail-security products all do brand
+impersonation, and the matching techniques are public (see
+[sublime-rules](https://github.com/sublime-security/sublime-rules), MIT). The
+gap this fills is a self-hosted rspamd stack with an admin-editable brand
+database, and Hungarian brands, which off-the-shelf brand lists omit
+(MISP's `bank-website` warninglist, for instance, carries 2,226 bank domains
+and not one `.hu`).
+
+Five signals, all conditioned on the From-domain not being the brand's own:
+display name (`BRAND_DN_SPOOF`), From localpart (`BRAND_ADDR_SPOOF`), Subject
+(`BRAND_SUBJ_SPOOF`, or `BRAND_SUBJ_OBFUS` at three times the weight when the
+brand is only readable after un-disguising it), and classic phishing wording
+(`BRAND_LURE`) that scores **only** next to one of the others — "please verify
+your account" is also what a genuine password reset says.
+
+Matching folds case, accents, Cyrillic/Greek homoglyphs and lookalike digits
+before allowing one edit of distance, so `0TP`, `ОТР`, `Micr0soft` and
+`Magyar Pósta` all resolve to the brand they imitate — while ordinary-word
+brand names (Visa, Apple, Booking) use whole-name-only variants so a travel
+agency or a hotel confirmation stays clean.
+
+Both halves are data, editable from the console (Rendszer → Márkavédelem) and
+seeded here: 16 Hungarian + 30 international brands with their real sending
+domains, and English + Hungarian lure phrases. **The rule is language-neutral
+by construction — adding a language is a new key in `brand_lures.json`, not a
+code change.** See `docs/GUIDE.md` (`ENABLE_HU_BRAND_GUARD`) for the details.
+
 ## Usage
 
 ```bash
