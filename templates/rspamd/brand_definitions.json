@@ -37,7 +37,7 @@
       "domains": ["mav.hu", "mavcsoport.hu", "mav-start.hu"] },
     { "id": "nav", "name": "NAV",
       "variants": ["nav", "nemzeti ado es vamhivatal"],
-      "domains": ["nav.gov.hu", "gov.hu"] },
+      "domains": ["nav.gov.hu"] },
     { "id": "mbh", "name": "MBH Bank",
       "variants": ["mbh bank", "=mbh"],
       "domains": ["mbhbank.hu"] },

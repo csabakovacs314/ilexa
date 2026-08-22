@@ -102,6 +102,27 @@ local function normalize(s)
   return s
 end
 
+-- Iterate a JSON array defensively.
+--
+-- Both data files are documented as hand-editable standing config, so
+-- "variants": "otp" instead of ["otp"] is expected operator usage -- and in
+-- Lua 5.1 (which rspamd runs) ipairs() on a scalar RAISES. rspamd loads
+-- lua.local.d/*.lua with a bare dofile and no pcall, so that error does not
+-- just skip this rule: it aborts the whole custom-rule load, taking
+-- hu_classify.lua and hu_phish_scam_log.lua with it, and rspamd then fails
+-- its own configtest. The header of this file promises the opposite ("mail
+-- flow is never affected"), so make that true: a mistyped value is reported
+-- and skipped, never thrown.
+local function each_list(v, what, ctx)
+  if type(v) == 'table' then return ipairs(v) end
+  if v ~= nil then
+    rspamd_logger.errx(rspamd_config,
+      'brand_guard: %s for %s must be a list, got %s -- ignoring it',
+      what, ctx, type(v))
+  end
+  return ipairs({})
+end
+
 local function lev_le1(a, b)
   if math.abs(#a - #b) > 1 then return false end
   return rspamd_util.levenshtein_distance(a, b) <= 1
@@ -118,9 +139,9 @@ if defs.enabled == false then return end
 
 local brands = {}
 local all_domains = {}   -- every protected brand's real domains: hard skip set
-for _, b in ipairs(defs.brands or {}) do
+for _, b in each_list(defs.brands, 'brands', 'the definitions file') do
   local entry = { id = tostring(b.id or '?'), variants = {}, domains = {} }
-  for _, v in ipairs(b.variants or {}) do
+  for _, v in each_list(b.variants, 'variants', tostring(b.id or '?')) do
     v = tostring(v)
     local exact = v:sub(1, 1) == '='
     local vn = normalize(exact and v:sub(2) or v)
@@ -130,7 +151,7 @@ for _, b in ipairs(defs.brands or {}) do
       entry.variants[#entry.variants + 1] = { v = vn, exact = exact }
     end
   end
-  for _, d in ipairs(b.domains or {}) do
+  for _, d in each_list(b.domains, 'domains', tostring(b.id or '?')) do
     d = tostring(d):lower()
     entry.domains[d] = true
     all_domains[d] = true
@@ -149,8 +170,17 @@ do
       rspamd_logger.errx(rspamd_config, 'brand_guard: cannot parse %s: %s', LURES, lerr)
     end
   elseif ldata.enabled ~= false then
-    for lang, list in pairs(ldata.phrases or {}) do
-      for _, p in ipairs(list or {}) do
+    -- pairs() on a scalar raises exactly like ipairs(), so the container
+    -- gets the same treatment as the lists inside it.
+    local phrases = ldata.phrases
+    if phrases ~= nil and type(phrases) ~= 'table' then
+      rspamd_logger.errx(rspamd_config,
+        'brand_guard: "phrases" must be an object, got %s -- ignoring the lure file',
+        type(phrases))
+      phrases = nil
+    end
+    for lang, list in pairs(phrases or {}) do
+      for _, p in each_list(list, 'phrases', tostring(lang)) do
         local pn = normalize_plain(tostring(p))
         -- Short phrases match far too much prose to be evidence of anything.
         if #pn >= 8 then

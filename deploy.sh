@@ -399,9 +399,16 @@ apply_defaults() {
   : "${ENABLE_UNOFFICIAL_SIGS:=yes}"
   : "${ENABLE_MX_CHECK:=yes}"; : "${ENABLE_KNOWN_SENDERS:=yes}"
   : "${ENABLE_MTA_STS:=yes}"; : "${MTA_STS_MODE:=enforce}"; : "${TLSRPT_RUA:=$ADMIN_EMAIL}"
-  # Answers-file runs never see the interactive prompt, so an answers file
-  # written before ALERT_EMAIL existed must still end up with working alerts.
-  : "${ALERT_EMAIL:=$ADMIN_EMAIL}"
+  # `=`, NOT `:=` -- backfill only when the key is UNSET.
+  #
+  # The purpose is an answers file written before ALERT_EMAIL existed. `:=`
+  # also substitutes on an EMPTY value, which made the interactive prompt's
+  # own "blank = none" impossible: an operator who deliberately cleared the
+  # field silently got ADMIN_EMAIL, and every cron failure went to a mailbox
+  # they had declined. Two pieces of unreachable code proved the intent -- the
+  # summary's "(none — scheduled-job alerts disabled)" and 55-ilexa's
+  # "ALERT_EMAIL empty" warning, neither of which could ever run.
+  : "${ALERT_EMAIL=$ADMIN_EMAIL}"
   : "${ENABLE_IPV6:=no}"
   if [ "$ENABLE_IPV6" = yes ]; then INET_PROTOCOLS=all; MYNETWORKS="127.0.0.0/8, [::1]/128"
   else INET_PROTOCOLS=ipv4; MYNETWORKS="127.0.0.0/8"; fi

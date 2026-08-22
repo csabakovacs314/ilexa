@@ -145,10 +145,31 @@ if [ "$DRY_RUN" != 1 ] && [ "${ENABLE_ILEXA:-yes}" = yes ]; then
   # so operator edits survive re-runs. The rule file IS re-rendered.
   install -d -m 755 /etc/rspamd/lua.local.d
   install -m 644 "$MD_TEMPLATES/rspamd/brand_guard.lua" /etc/rspamd/lua.local.d/brand_guard.lua
-  if [ -f /etc/rspamd/lua.d/brand_guard.lua ] || [ -f /etc/rspamd/rspamd.local.lua ]; then
-    rm -f /etc/rspamd/lua.d/brand_guard.lua /etc/rspamd/rspamd.local.lua
+  # Clean up the first ship's invented loader -- CAREFULLY. rspamd.local.lua is
+  # rspamd's OWN documented operator hook (rules/rspamd.lua dofiles it if
+  # present), so it is only ours to delete when it actually is ours: the file
+  # we wrote referenced lua.d/. Anything else is an administrator's own rules,
+  # and it is backed up and left in place rather than removed.
+  #
+  # An earlier version of this block deleted it on existence alone, with no
+  # backup and no content check -- destroying hand-written Lua on the
+  # add-to-an-existing-server path while logging only "removed the superseded
+  # loader". That contradicted this toolkit's own rules ("never silently
+  # overwrite configuration", "preserve backups before destructive changes").
+  if [ -f /etc/rspamd/lua.d/brand_guard.lua ]; then
+    rm -f /etc/rspamd/lua.d/brand_guard.lua
     rmdir /etc/rspamd/lua.d 2>/dev/null || true
-    log_info "removed the superseded lua.d/ brand-guard loader"
+    log_info "removed the superseded lua.d/ brand-guard rule"
+  fi
+  if [ -f /etc/rspamd/rspamd.local.lua ]; then
+    if grep -q 'lua\.d' /etc/rspamd/rspamd.local.lua; then
+      backup /etc/rspamd/rspamd.local.lua
+      rm -f /etc/rspamd/rspamd.local.lua
+      log_info "removed the superseded rspamd.local.lua loader (backed up)"
+    else
+      backup /etc/rspamd/rspamd.local.lua
+      log_warn "/etc/rspamd/rspamd.local.lua is not ours (no lua.d reference) — backed up and LEFT IN PLACE"
+    fi
   fi
   _bg_seeded=0
   for _bf in brand_definitions.json brand_lures.json; do
@@ -157,6 +178,36 @@ if [ "$DRY_RUN" != 1 ] && [ "${ENABLE_ILEXA:-yes}" = yes ]; then
       [ "$_bf" = brand_definitions.json ] && _bg_seeded=1
     fi
   done
+  # ONE-TIME SECURITY MIGRATION on an existing file.
+  #
+  # brand_definitions.json is standing config, so a defect in the seed data we
+  # shipped never reaches hosts that already have it -- and this particular
+  # entry is a hole, not a preference: bare "gov.hu" is not a public suffix, so
+  # rspamd resolves EVERY *.gov.hu sender to it and the whole Hungarian public
+  # sector was exempt from all five BRAND_* checks. Removing exactly that one
+  # string, with a backup, is narrower than leaving installed hosts unprotected.
+  # nav.gov.hu (kept) covers NAV, and the Lua rule compares the full domain.
+  if [ -s "$LOCALD/brand_definitions.json" ] \
+     && grep -q '"gov\.hu"' "$LOCALD/brand_definitions.json"; then
+    backup "$LOCALD/brand_definitions.json"
+    if python3 - <<'PYMIG'
+import json
+p = '/etc/rspamd/local.d/brand_definitions.json'
+d = json.load(open(p))
+hit = False
+for b in d.get('brands', []):
+    if isinstance(b, dict) and isinstance(b.get('domains'), list) and 'gov.hu' in b['domains']:
+        b['domains'] = [x for x in b['domains'] if x != 'gov.hu']; hit = True
+if hit:
+    json.dump(d, open(p, 'w'), ensure_ascii=False, indent=2)
+PYMIG
+    then
+      log_info "brand_definitions.json: removed the bare gov.hu whitelist entry (it exempted every *.gov.hu sender)"
+    else
+      log_warn "could not remove the gov.hu entry from brand_definitions.json — do it by hand, it exempts every *.gov.hu sender"
+    fi
+  fi
+
   # Only at SEED time: after that the JSON's own "enabled" key is the live
   # switch (the console writes it), and a re-run must not stomp on it.
   if [ "$_bg_seeded" = 1 ] && [ "${ENABLE_HU_BRAND_GUARD:-yes}" != yes ]; then
@@ -801,12 +852,30 @@ if [ "$DRY_RUN" != 1 ]; then
 fi
 
 if [ "$DRY_RUN" != 1 ]; then
-  rspamadm configtest >/dev/null 2>&1 && log_info "rspamadm configtest OK" \
-    || log_warn "rspamadm configtest reported problems — check $LOCALD"
-  # restart, not reload: rspamd.local.lua and the lua.d/ rules it loads are
-  # executed once at worker start; a reload demonstrably does not re-run them
-  # (verified on the reference host — HU_BRAND_DN_SPOOF only registered after
-  # a full restart).
+  # A FAILED configtest now ABORTS instead of warning, and it does so BEFORE
+  # any service is touched.
+  #
+  # This block used to end in svc_reload, where a broken config was survivable:
+  # SIGHUP makes rspamd log "cannot parse new config, revert to old one" and
+  # keep the already-running workers. Moving to svc_restart (needed because Lua
+  # rules only execute at worker start) quietly turned that into "rspamd stops
+  # and does not come back" -- and with milter_default_action = accept set
+  # above, every inbound message would then be delivered unfiltered, while the
+  # run still printed "deploy complete" (no module uses set -e) and mark_done
+  # below made the next run skip this module entirely.
+  #
+  # The operator's rspamd keeps running its last good config; the run stops so
+  # the problem is seen. Note configtest is a syntax check, not a guarantee --
+  # it is known to pass on some semantically broken states -- which is another
+  # reason not to follow it with an unconditional restart.
+  if ! rspamadm configtest >/dev/null 2>&1; then
+    rspamadm configtest 2>&1 | tail -5 | while IFS= read -r _l; do log_error "  $_l"; done
+    die "rspamadm configtest FAILED — refusing to restart rspamd (it keeps running its previous config). Fix $LOCALD and re-run."
+  fi
+  log_info "rspamadm configtest OK"
+  # restart, not reload: the lua.local.d/ rules are executed once at worker
+  # start; a reload demonstrably does not re-run them (verified on the
+  # reference host — BRAND_DN_SPOOF only registered after a full restart).
   svc_restart rspamd
   svc_reload postfix
 fi

@@ -478,6 +478,16 @@ EOF
 # Seed-only: if the file already exists the console owns it and a re-run must
 # not overwrite the operator's choice (including a deliberate "off").
 if [ "$DRY_RUN" != 1 ]; then
+  # Validate before writing: this value is handed to mail(1) as a recipient
+  # argument by cron-alert.sh, and deploy.sh does not check it. The console's
+  # own helper (qa-alerts-config.sh) enforces exactly this shape for exactly
+  # this reason; an option-shaped or typo'd value written here would otherwise
+  # persist forever, because the seed is deliberately one-shot.
+  if [ -n "${ALERT_EMAIL:-}" ] \
+     && ! printf '%s' "$ALERT_EMAIL" | grep -qE '^[A-Za-z0-9._+-]+@[A-Za-z0-9-]+(\.[A-Za-z0-9-]+)+$'; then
+    log_warn "ALERT_EMAIL is not a valid address ('$ALERT_EMAIL') — not seeding alerts.conf; set it in the console (Admin tab)"
+    ALERT_EMAIL=""
+  fi
   if [ -n "${ALERT_EMAIL:-}" ] && [ ! -e /etc/ilexa/alerts.conf ]; then
     install -d -m 755 /etc/ilexa
     printf '# Destination for scheduled-job alerts (cron-alert.sh).\n# Seeded by the installer from ALERT_EMAIL; the console Admin tab owns it now.\n%s\n' \
