@@ -31,6 +31,12 @@
 # secure_ip = 127.0.0.1, and the handler talks to 127.0.0.1:11334.
 # Runs after 50-web (domain rows exist) and 40-rspamd (controller configured).
 source "$MD_ROOT/lib/common.sh"
+# db.sh provides db_exec() for the alias seeding below. Modules run in their
+# OWN shell, so nothing another module sourced carries over -- the exact bug
+# 55-ilexa's header documents, faithfully reproduced here on first ship:
+# every alias INSERT died "command not found", logged as "alias seed failed",
+# and the report addresses silently did not exist on the first real install.
+source "$MD_ROOT/lib/db.sh"
 step_guard 58-report-learn || exit 0
 
 : "${ENABLE_REPORT_ADDRESSES:=yes}"
