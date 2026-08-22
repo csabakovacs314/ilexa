@@ -137,8 +137,21 @@ if [ "$DRY_RUN" != 1 ]; then
   # the composites below have no such dependency and always ship -- which is
   # the point of moving this section out of the ENABLE_ILEXA gate.
   _bg_multimap=0
-  install -m 644 "$MD_TEMPLATES/rspamd/hu_brand_names.re"    "$LOCALD/maps.d/hu_brand_names.re"
-  install -m 644 "$MD_TEMPLATES/rspamd/hu_brand_domains.inc" "$LOCALD/maps.d/hu_brand_domains.inc"
+  # These two maps ship with headers telling the operator to extend them by
+  # hand, and the installer overwrites them on every run. `install` truncates
+  # the target, so an added campaign regexp or a customer's legitimate domain
+  # vanished with no copy kept anywhere -- the exact "never silently overwrite
+  # configuration / preserve backups before destructive changes" rule this
+  # toolkit sets for itself. Back up (and say so) whenever the file on disk
+  # differs from what we are about to write.
+  for _m in hu_brand_names.re hu_brand_domains.inc; do
+    if [ -e "$LOCALD/maps.d/$_m" ] \
+       && ! cmp -s "$MD_TEMPLATES/rspamd/$_m" "$LOCALD/maps.d/$_m"; then
+      backup "$LOCALD/maps.d/$_m"
+      log_warn "maps.d/$_m had local changes — backed up before being replaced from the template"
+    fi
+    install -m 644 "$MD_TEMPLATES/rspamd/$_m" "$LOCALD/maps.d/$_m"
+  done
   if [ -d "$LOCALD/multimap.d" ]; then
     if [ "${ENABLE_HU_BRAND_GUARD:-yes}" = yes ]; then
       install -m 644 "$MD_TEMPLATES/rspamd/hu-brand-guard-multimap.conf" "$LOCALD/multimap.d/hu-brand-guard.conf"
@@ -269,8 +282,13 @@ PYMIG
     fi
   fi
   {
-    echo "# Written by 40-rspamd — re-rendered on every run; local additions belong"
-    echo "# in a separate file, not here."
+    echo "# Written by 40-rspamd — re-rendered on every run, so anything added"
+    echo "# here is lost on the next one. Put local composites in"
+    echo "#   /etc/rspamd/local.d/composites.d/<name>.conf"
+    echo "# which the glob include at the end of this file picks up and this"
+    echo "# module never touches. (That directory is the fix for the previous"
+    echo "# version of this comment, which said local additions belong in a"
+    echo "# separate file without providing one to use.)"
     echo "PHISH_ON_TRUSTED {"
     echo "  expression = \"-PHISHING & (RWL_AMI | DWL_DNSWL_MED | RCVD_IN_DNSWL_LOW | RWL_MAILSPIKE_VERYGOOD | RWL_MAILSPIKE_EXCELLENT | RWL_MAILSPIKE_GOOD)\";"
     echo "  score = 3.0;"
@@ -295,7 +313,12 @@ PYMIG
       echo "  description = \"Brand display-name spoof confirmed by both the exact and the fuzzy matcher\";"
       echo "}"
     fi
+    echo ""
+    echo "# Operator-owned composites, never rewritten by the installer."
+    echo ".include(glob=true,try=true,priority=1,duplicate=merge) \"\$LOCAL_CONFDIR/local.d/composites.d/*.conf\""
   } | write_file "$LOCALD/composites.conf" 644
+  install -d -m 0750 "$LOCALD/composites.d"
+  chown root:_rspamd "$LOCALD/composites.d" 2>/dev/null || chown root:root "$LOCALD/composites.d"
 fi
 
 # Bayes needs somewhere to persist; autolearn keeps it useful without an operator.
@@ -419,7 +442,8 @@ if [ "$DRY_RUN" != 1 ]; then
 # learned combination of every other symbol.
 #
 # Two settings below are deliberately NOT rspamd's defaults, both fixing a
-# silent never-trains stall diagnosed on the reference host 2026-08-22:
+# silent never-trains stall diagnosed on the reference host 2026-08-22, where
+# the module had been enabled for two weeks with ZERO ANNs ever produced.
 #
 # 1. classes_bias = 0.5. In the default balanced mode (bias 0.0) training
 #    needs BOTH classes at max_trains. Ham fills from ordinary mail; spam
@@ -427,37 +451,38 @@ if [ "$DRY_RUN" != 1 ]; then
 #    spam is still climbing. 0.5 tolerates up to a 2:1 imbalance, which is
 #    what a real mail server actually produces.
 #
-# 2. max_trains = 500, not 1000. The training-vector redis key embeds a
-#    digest of the SYMBOL LIST (rn_<rule>_<set>_<digest8>_<ver>_*_set), so
-#    ANY change to the enabled symbol set starts a brand-new, empty training
-#    set -- observed live: adding five symbols reset 1001 ham / 568 spam to
-#    zero. A target that takes months is therefore never reached on a server
-#    that gains symbols regularly. 500 (needing 250 of the smaller class) is
-#    reachable in a few weeks and is still a meaningful sample.
+# 2. max_trains = 200, not rspamd's 1000.
 #
-#    Churn only resets ACCUMULATING vectors: once an ANN is trained it keeps
+#    Two things force it down. First, the training-vector redis key embeds a
+#    digest of the SYMBOL LIST (rn_<rule>_<set>_<digest8>_<ver>_*_set), so ANY
+#    change to the enabled symbol set starts a brand-new, empty training set --
+#    observed live: adding five symbols reset 1001 ham / 568 spam to zero. A
+#    target that takes months is therefore never reached on a server that
+#    gains symbols regularly.
+#
+#    Second, vectors DEDUPLICATE: redis stores them in a SET, so messages that
+#    produce the same symbol combination count once. 341 archived spam messages
+#    yielded 148 distinct vectors, because spam arrives in campaigns that all
+#    score alike (verified by scanning one message twice -- the set grew by
+#    one, not two). The effective corpus is DISTINCT VECTORS, not messages, and
+#    no amount of replaying changes that.
+#
+#    200 was then chosen empirically. At 500/bias 0.5 the first ANN trained on
+#    598 ham vs 148 spam and rspamd REJECTED it: "degenerate model: constant or
+#    single-class output ... predicted spam=0 ham=746 of 746" -- the classic
+#    collapse of a 4:1 imbalanced set with a small minority class. The ham set
+#    was trimmed to bring the ratio to ~1.7:1, and the threshold follows the
+#    class the corpus can actually fill.
+#
+#    NOTE the arithmetic rspamd applies, which is NOT "max_trains of each
+#    class": lualib/plugins/neural.lua gates on the TOTAL --
+#    `#ham_vec + #spam_vec < max_trains / 2` -> "insufficient training data".
+#    classes_bias then governs how lopsided that total may be.
+#
+#    Churn resets only ACCUMULATING vectors. Once an ANN is trained it keeps
 #    being loaded through later symbol drift (up to 30% distance, see
-#    is_profile_compatible() in rspamd's lualib/plugins/neural.lua). The goal
-#    is just to get over the line once.
-#
-#
-# 3. max_trains = 250, lowered again 2026-08-22 after measuring what the
-#    archive can actually yield. Training vectors live in a redis SET, so
-#    IDENTICAL symbol vectors collapse: 341 archived spam messages produced
-#    only 148 distinct vectors, because spam arrives in campaigns that all
-#    score the same way (verified by scanning one message twice -- the set
-#    grew by one, not two). The effective corpus is DISTINCT VECTORS, not
-#    messages, and no amount of replaying changes that.
-#
-#    200 was then chosen empirically, not by taste. At 250/bias 0.5 the first
-#    ANN trained on 598 ham vs 148 spam and rspamd REJECTED it: "degenerate
-#    model: constant or single-class output ... predicted spam=0 ham=746 of
-#    746" -- the classic collapse of a 4:1 imbalanced set with a small
-#    minority class. The ham set was trimmed to ~248 to bring the ratio to
-#    1.7:1, and the threshold follows the class the corpus can actually fill:
-#    200 needs 100 of the smaller class, comfortably under the ~148 ceiling.
-#    Expect a thin first model; live traffic keeps adding distinct vectors and
-#    the ANN retrains as it goes.
+#    is_profile_compatible() in lualib/plugins/neural.lua), so the goal is to
+#    get over the line once.
 #
 # Progress is snapshotted daily by qa-neural-snapshot.sh ->
 # /var/log/qa-neural-snapshots.log, so a repeat stall is visible instead of
