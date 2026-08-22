@@ -483,6 +483,44 @@ svc_reload() { # unit
   systemctl reload "$1" 2>/dev/null || systemctl restart "$1"
 }
 
+# pf_check_params PARAM...  -> warns about parameters this Postfix does not know
+#
+# CAPABILITY DETECTION, not an OS assumption (see the project's own rule).
+#
+# `postconf -e "some_removed_param = value"` exits 0, prints nothing and writes
+# the line anyway -- verified on Postfix 3.5.25 (EL9) and 3.8.6 (Ubuntu 24).
+# So if a parameter is renamed or dropped in a future release, the installer
+# happily writes a setting that Postfix will never read, reports success, and
+# the hardening it was meant to apply is silently absent. Every parameter this
+# toolkit writes exists on both platforms today (all 90 checked), so this is a
+# guard for EL10 / Ubuntu 26 and whatever follows -- the point is that such a
+# gap becomes VISIBLE instead of silent.
+#
+# Deliberately a warning, not a die: one unknown parameter should not block an
+# install, and the operator can decide whether it matters.
+pf_check_params() {
+  [ "${DRY_RUN:-0}" = 1 ] && return 0
+  command -v postconf >/dev/null 2>&1 || return 0
+  # Detect by LINE COUNT, not exit status. `postconf -h <unknown>` exits 0 and
+  # prints only a stderr warning (verified on 3.5.25 and 3.8.6), so testing the
+  # exit code detects nothing -- the first version of this guard was silently
+  # useless, which a direct test of the tripwire caught. A KNOWN parameter with
+  # an empty value (relayhost on most hosts) still prints one empty line, so
+  # line count separates the two where captured output cannot: command
+  # substitution strips the trailing newline and both look like "".
+  local missing="" k n
+  for k in "$@"; do
+    n=$(postconf -h "$k" 2>/dev/null | wc -l)
+    [ "${n:-0}" -ge 1 ] || missing="$missing $k"
+  done
+  if [ -n "$missing" ]; then
+    log_warn "this Postfix ($(postconf -h mail_version 2>/dev/null)) does not know:${missing}"
+    log_warn "  those settings were written but will have NO effect — check the Postfix release notes for renames"
+    return 1
+  fi
+  return 0
+}
+
 svc_restart() { # unit — a HARD restart, for daemons whose reload does not
   # re-execute everything (rspamd's rspamd.local.lua/lua.d rules run once at
   # worker start; svc_reload's reload path would silently skip them).

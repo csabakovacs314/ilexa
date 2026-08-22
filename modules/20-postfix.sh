@@ -167,6 +167,28 @@ if [ "$DRY_RUN" != 1 ]; then
   postmap /etc/postfix/transport
   postfix set-permissions >/dev/null 2>&1 || true
   postfix check || die "postfix check failed"
+
+  # Does this Postfix actually KNOW the settings we just wrote?
+  #
+  # `postfix check` validates syntax, not vocabulary, and `postconf -e` writes
+  # an unknown parameter without complaint (exit 0, no output -- measured on
+  # 3.5.25/EL9 and 3.8.6/Ubuntu 24). A parameter renamed or dropped by a future
+  # release would therefore be written, reported fine, and simply never read --
+  # with the protection it was meant to provide silently absent. These are the
+  # ones where that matters: TLS, authentication, anti-relay, postscreen and
+  # the milter hand-off. All present on both supported families today; this is
+  # the tripwire for EL10, Ubuntu 26 and later.
+  pf_check_params \
+    smtpd_tls_security_level smtp_tls_security_level \
+    smtpd_tls_mandatory_protocols smtp_tls_mandatory_protocols \
+    smtpd_tls_cert_file smtpd_tls_key_file smtpd_tls_auth_only \
+    smtpd_sasl_auth_enable smtpd_relay_restrictions \
+    smtpd_recipient_restrictions smtpd_sender_restrictions \
+    smtpd_helo_restrictions smtpd_client_restrictions \
+    postscreen_dnsbl_sites postscreen_dnsbl_threshold \
+    smtpd_milters non_smtpd_milters milter_default_action \
+    virtual_transport message_size_limit \
+    || log_warn "review the settings listed above before trusting this host's hardening"
 fi
 
 # Seed the standing config once so the console card has something to show

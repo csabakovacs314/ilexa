@@ -383,7 +383,21 @@ for _, sym in ipairs({
     description = 'Subject names a protected brand but the sender is a foreign domain' },
   { name = 'BRAND_SUBJ_OBFUS', score = 3.0,
     description = 'Subject names a protected brand in disguised form (homoglyph/digit tricks) from a foreign domain' },
-  { name = 'BRAND_LURE', score = 2.0,
+  -- 3.0, not 2.0, and the number is arithmetic rather than taste: the WEAKEST
+  -- impersonation signal is 1.0 (a plain brand mention in the Subject, or the
+  -- From localpart), and the spam-tag threshold is add_header = 4. 1.0 + 3.0
+  -- reaches it exactly, so ANY brand signal combined with lure wording gets
+  -- tagged. Deliberate policy call (operator, 2026-08-22): for brand
+  -- impersonation a false positive is cheaper than a scam believed.
+  --
+  -- NOTE the coupling: if you raise add_header above 4, raise this to match,
+  -- or the weakest pair silently stops tagging again.
+  --
+  -- The pairing requirement stays. A lure phrase ALONE still scores nothing,
+  -- because "please verify your account within 24 hours" is also what a
+  -- genuine password reset says -- scoring that on its own would flag real
+  -- mail from every bank and shop the users actually use.
+  { name = 'BRAND_LURE', score = 3.0,
     description = 'Brand-impersonating message also uses classic phishing lure language' },
 }) do
   rspamd_config:register_symbol({
