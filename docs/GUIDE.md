@@ -210,6 +210,7 @@ These are the keys in `answers.example.conf` (and the questions the wizard asks)
 | `SPAM_SUBJECT_TAG` | Subject prefix applied at the rewrite threshold | `{Spam?}` |
 | `ENABLE_MX_CHECK` | Probe the envelope-from domain's MX (rspamd `mx_check`; uses the module's own built-in symbol scores, fails open if outbound :25 is blocked) | `yes` |
 | `ENABLE_KNOWN_SENDERS` | Per-sender reputation for freemail domains, where domain reputation is meaningless; needs accumulated history before its symbols fire | `yes` |
+| `ENABLE_HU_BRAND_GUARD` | Brand-impersonation guard: From display-name claiming a known Hungarian brand from a foreign domain scores +5 (`HU_BRAND_SPOOF`); the universal `PHISH_ON_TRUSTED` composite (phishing via whitelisted infra loses its whitelist bonuses) installs regardless | `yes` |
 
 Content filtering is **rspamd only** — this replaces the old `SA_THRESHOLD`; there
 is no separate SpamAssassin-style single score, just the three thresholds above.

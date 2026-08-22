@@ -106,6 +106,43 @@ if [ "$DRY_RUN" != 1 ] && [ "${ENABLE_ILEXA:-yes}" = yes ]; then
     chmod 0750 "$LOCALD/$_d"
   done
   render "$MD_TEMPLATES/rspamd/multimap.conf.tmpl" "$LOCALD/multimap.conf"
+
+  # ---- brand-impersonation guard + phishing/whitelist composites -----------
+  # Born from a live incident (2026-08-22): a compromised university account
+  # sent OTP-Bank/MagyarPosta phishing that every reputation layer voted ham
+  # on -- the whitelists describe the SERVER, and a hijacked account weaponises
+  # them. Three pieces:
+  #   maps + multimap pair (multimap.d/, survives multimap.conf re-renders;
+  #     zero-score alone) -- installed whenever the guard is on;
+  #   HU_BRAND_SPOOF composite (+5): brand named in From, domain not the
+  #     brand's own. HU-brand policy, hence the toggle;
+  #   PHISH_ON_TRUSTED composite (+3, strips whitelist weights when rspamd's
+  #     own PHISHING symbol fires through whitelisted infra) -- universal
+  #     logic, installed unconditionally.
+  install -m 644 "$MD_TEMPLATES/rspamd/hu_brand_names.re"    "$LOCALD/maps.d/hu_brand_names.re"
+  install -m 644 "$MD_TEMPLATES/rspamd/hu_brand_domains.inc" "$LOCALD/maps.d/hu_brand_domains.inc"
+  if [ "${ENABLE_HU_BRAND_GUARD:-yes}" = yes ]; then
+    install -m 644 "$MD_TEMPLATES/rspamd/hu-brand-guard-multimap.conf" "$LOCALD/multimap.d/hu-brand-guard.conf"
+  else
+    rm -f "$LOCALD/multimap.d/hu-brand-guard.conf"
+  fi
+  {
+    echo "# Written by 40-rspamd — re-rendered on every run; local additions belong"
+    echo "# in a separate file, not here."
+    echo "PHISH_ON_TRUSTED {"
+    echo "  expression = \"-PHISHING & (RWL_AMI | DWL_DNSWL_MED | RCVD_IN_DNSWL_LOW | RWL_MAILSPIKE_VERYGOOD | RWL_MAILSPIKE_EXCELLENT | RWL_MAILSPIKE_GOOD)\";"
+    echo "  score = 3.0;"
+    echo "  description = \"Phishing content sent through whitelisted infrastructure\";"
+    echo "}"
+    if [ "${ENABLE_HU_BRAND_GUARD:-yes}" = yes ]; then
+      echo "HU_BRAND_SPOOF {"
+      echo "  expression = \"HU_BRAND_NAME & !HU_BRAND_FROMDOM\";"
+      echo "  score = 5.0;"
+      echo "  description = \"From claims a Hungarian brand from a foreign domain\";"
+      echo "  policy = \"leave\";"
+      echo "}"
+    fi
+  } | write_file "$LOCALD/composites.conf" 644
 fi
 
 # Bayes needs somewhere to persist; autolearn keeps it useful without an operator.
