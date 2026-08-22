@@ -501,6 +501,15 @@ if [ "$DRY_RUN" != 1 ]; then
   fi
 fi
 
+# Brand-guard review. Runs as ROOT (reads /var/log/rspamd). Mails only when a
+# sender was tagged SOLELY because of the brand guard -- the shape a false
+# positive takes -- so a clean day is silent. 06:15 is after the midnight log
+# rotation; the script reads the rotated file and the live one together.
+write_file /etc/cron.d/qa-brand-review 0644 root:root <<'EOF'
+MAILTO=""
+15 6 * * * root /usr/bin/cron-alert.sh qa-brand-review /usr/local/sbin/qa-brand-review.sh
+EOF
+
 # rspamd neural training progress. Runs as ROOT (reads redis directly, no
 # message content). Exists because the neural module fails SILENTLY: when it
 # never reaches its training threshold -- or when a symbol-set change resets
