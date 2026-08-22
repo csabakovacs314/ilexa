@@ -266,6 +266,26 @@ deploy_postfixadmin() {
   # public/users/password-recover.php sends -- Gmail (correctly) DMARC-
   # rejects that as unauthenticated. Confirmed live on hawking 2026-08-21.
   setvar POSTMASTER_EMAIL "postmaster@${PRIMARY_DOMAIN}"
+  # Upstream 4.0.1 bug (still present as of 2026-08): the password-recovery
+  # flow's init_session() call omits the mfa_complete argument, so EVERY
+  # user landing from a reset link -- TOTP configured or not, $CONF totp NO
+  # or YES -- gets a session marked MFA-incomplete and is bounced to a TOTP
+  # prompt they cannot satisfy (hit live on the reference host the first
+  # time a real user used the reset flow). Patch mirrors users/login.php:
+  # complete the session unless the account genuinely uses TOTP, which a
+  # reset must still not bypass. Guarded so a future PFA that fixes or
+  # reshapes this line WARNS instead of being silently half-patched.
+  if [ "$DRY_RUN" != 1 ] && [ -f "$dir/public/users/password-change.php" ]; then
+    if grep -q "init_session(\$tUsername, \$context === 'admin');" "$dir/public/users/password-change.php"; then
+      sed -i "s|init_session(\$tUsername, \$context === 'admin');|\$totppf = new TotpPf(\$context === 'admin' ? 'admin' : 'mailbox', new Login(\$context === 'admin' ? 'admin' : 'mailbox')); init_session(\$tUsername, \$context === 'admin', !\$totppf->usesTOTP(\$tUsername));|" \
+        "$dir/public/users/password-change.php"
+      php -l "$dir/public/users/password-change.php" >/dev/null 2>&1 \
+        && log_info "PostfixAdmin password-recovery MFA bug patched" \
+        || die "PFA password-change.php patch broke the file -- aborting"
+    else
+      log_warn "PFA password-change.php has a different shape than ${PA_VER}'s known MFA bug -- verify the recovery flow manually"
+    fi
+  fi
   render "$MD_TEMPLATES/web/postfixadmin-config.local.php.tmpl" "$dir/config.local.php"
   [ "$DRY_RUN" != 1 ] && chown "root:$WEB_GROUP" "$dir/config.local.php" && chmod 640 "$dir/config.local.php"
   # Console-matching Bootstrap overrides, referenced by theme_custom_css above.
