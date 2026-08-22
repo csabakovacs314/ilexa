@@ -144,11 +144,19 @@ for _, b in each_list(defs.brands, 'brands', 'the definitions file') do
   for _, v in each_list(b.variants, 'variants', tostring(b.id or '?')) do
     v = tostring(v)
     local exact = v:sub(1, 1) == '='
-    local vn = normalize(exact and v:sub(2) or v)
+    local bare = exact and v:sub(2) or v
+    local vn = normalize(bare)
+    -- BOTH folds are kept. The aggressive fold (vn) is what text is matched
+    -- against; the plain fold (vp) is what the SPOOF-vs-OBFUS test needs.
+    -- Storing only vn meant a variant containing a digit ("office 365" ->
+    -- "office e6s") could never be found in a digit-PRESERVING fold, so the
+    -- discriminator answered "deliberate disguise" every time and ordinary
+    -- Office 365 mail scored 3.0 instead of 1.0.
+    local vp = normalize_plain(bare)
     -- 1-2 char variants match half the alphabet at distance 1; refuse them
     -- here rather than trusting every editor of the JSON.
     if #vn >= 3 then
-      entry.variants[#entry.variants + 1] = { v = vn, exact = exact }
+      entry.variants[#entry.variants + 1] = { v = vn, vp = vp, exact = exact }
     end
   end
   for _, d in each_list(b.domains, 'domains', tostring(b.id or '?')) do
@@ -200,7 +208,7 @@ local function contains_variant(norm)
   for _, b in ipairs(brands) do
     for _, vt in ipairs(b.variants) do
       if not vt.exact and padded:find(' ' .. vt.v .. ' ', 1, true) then
-        return b, vt.v
+        return b, vt
       end
     end
   end
@@ -218,11 +226,23 @@ local function check_display_name(dn_norm)
     for _, vt in ipairs(b.variants) do
       local v, hit = vt.v, false
       if vt.exact then
-        hit = (dn_norm == v) or lev_le1(dn_norm, v)
+        -- EXACT means exact. These are ordinary words ("visa", "apple",
+        -- "meta", "ups") marked '=' precisely so they cannot spread; allowing
+        -- one edit spread them anyway -- ubs/ups, vista/visa, beta/meta are
+        -- all distance 1, so genuine mail from UBS or a travel agency scored
+        -- 2.5. Both this file's header and GUIDE.md already promised whole-
+        -- name-only matching; this makes that true.
+        hit = (dn_norm == v)
       else
         if padded:find(' ' .. v .. ' ', 1, true) then
           hit = true
-        elseif lev_le1(dn_norm, v) then
+        elseif #v >= 4 and lev_le1(dn_norm, v) then
+          -- Fuzzy matching needs >= 4 characters, the same floor the token
+          -- path below already used. At 3 characters an edit of distance 1
+          -- reaches half the dictionary: max/mav, dvd/dpd, nap/nav, ubs/ups.
+          -- Nothing real is lost, because the DISGUISES are caught by the
+          -- folds, not by edit distance -- "0TP Bank" folds to "otp bank" and
+          -- "Micr0soft" to "microsoft", both exact containment matches.
           hit = true
         elseif #v >= 4 and not v:find(' ', 1, true) then
           for _, t in ipairs(tokens) do
@@ -230,7 +250,7 @@ local function check_display_name(dn_norm)
           end
         end
       end
-      if hit then return b, v end
+      if hit then return b, vt end
     end
   end
   return nil
@@ -282,11 +302,11 @@ local function brand_guard_cb(task)
   if dn and #dn >= 2 then
     local dn_norm = normalize(dn)
     if #dn_norm >= 3 and #dn_norm <= 120 then
-      local b, v = check_display_name(dn_norm)
+      local b, vt = check_display_name(dn_norm)
       if b then
         impersonation = true
         task:insert_result('BRAND_DN_SPOOF', 1.0,
-          string.format('%s:%s:%s', b.id, v, tld))
+          string.format('%s:%s:%s', b.id, vt.v, tld))
       end
     end
   end
@@ -294,11 +314,11 @@ local function brand_guard_cb(task)
   -- 2. From-address localpart claiming a brand (magyarposta@gmail.com).
   local lp = from[1].user
   if lp and #lp >= 3 and #lp <= 100 then
-    local b, v = contains_variant(normalize(lp))
+    local b, vt = contains_variant(normalize(lp))
     if b then
       impersonation = true
       task:insert_result('BRAND_ADDR_SPOOF', 1.0,
-        string.format('%s:%s:%s', b.id, v, tld))
+        string.format('%s:%s:%s', b.id, vt.v, tld))
     end
   end
 
@@ -311,13 +331,17 @@ local function brand_guard_cb(task)
     if #subj > 400 then subj = subj:sub(1, 400) end
     local full = normalize(subj)
     if #full >= 3 then
-      local b, v = contains_variant(full)
+      local b, vt = contains_variant(full)
       if b then
         impersonation = true
+        -- Compare like with like: the PLAIN fold of the subject against the
+        -- PLAIN fold of the variant. Searching for the aggressively-folded
+        -- variant here could never succeed for any variant containing a
+        -- digit, so those were always reported as deliberate disguise.
         local plain = normalize_plain(subj)
-        local sym = (' ' .. plain .. ' '):find(' ' .. v .. ' ', 1, true)
+        local sym = (' ' .. plain .. ' '):find(' ' .. vt.vp .. ' ', 1, true)
                     and 'BRAND_SUBJ_SPOOF' or 'BRAND_SUBJ_OBFUS'
-        task:insert_result(sym, 1.0, string.format('%s:%s:%s', b.id, v, tld))
+        task:insert_result(sym, 1.0, string.format('%s:%s:%s', b.id, vt.v, tld))
       end
     end
   end
@@ -337,7 +361,17 @@ local parent_id = rspamd_config:register_symbol({
   callback = brand_guard_cb,
   score = 0.0,
   description = 'Brand impersonation checks (display name, From localpart, Subject, lure language)',
-  group = 'phishing',
+  -- Our OWN group, not rspamd's stock 'phishing'.
+  --
+  -- scores.d/phishing_group.conf caps that group at max_score = 10.0, and it
+  -- already holds PHISHING (4.0), PHISHED_OPENPHISH and PHISHED_PHISHTANK
+  -- (7.0 each). On a message that trips real phishing detection AND brand
+  -- impersonation -- exactly the case this rule exists for -- the group total
+  -- was clamped and the brand evidence could contribute nothing, silently.
+  -- The sibling rule hu_classify.lua uses its own group for the same reason.
+  -- No cap is set here: the five symbols top out around 8.5 together, well
+  -- under the reject threshold, so they cannot run away on their own.
+  group = 'brand_guard',
 })
 
 for _, sym in ipairs({
@@ -354,6 +388,6 @@ for _, sym in ipairs({
 }) do
   rspamd_config:register_symbol({
     name = sym.name, type = 'virtual', parent = parent_id,
-    score = sym.score, description = sym.description, group = 'phishing',
+    score = sym.score, description = sym.description, group = 'brand_guard',
   })
 end
