@@ -464,6 +464,33 @@ write_file /etc/cron.d/qa-ioc-expire 0644 root:root <<EOF
 0 3 * * * ${WEB_USER} /usr/local/sbin/qa-ioc-expire.php >> /var/log/quarantine-admin/qa-ioc-expire.log 2>&1
 EOF
 
+# ---- alert destination -----------------------------------------------------
+# Seed /etc/ilexa/alerts.conf from ALERT_EMAIL. cron-alert.sh reads this file
+# to decide where scheduled-job failures go, and every cron this toolkit
+# installs is wrapped in it.
+#
+# Before this existed the file was created ONLY by the console's Admin tab, so
+# a fresh install discarded every alert until an operator happened to find
+# that setting -- which nobody does before the first failure they needed to
+# hear about. Confirmed on a real deployment: no alerts.conf, therefore silent
+# feed-failure, SIEM-health and neural-training alerts.
+#
+# Seed-only: if the file already exists the console owns it and a re-run must
+# not overwrite the operator's choice (including a deliberate "off").
+if [ "$DRY_RUN" != 1 ]; then
+  if [ -n "${ALERT_EMAIL:-}" ] && [ ! -e /etc/ilexa/alerts.conf ]; then
+    install -d -m 755 /etc/ilexa
+    printf '# Destination for scheduled-job alerts (cron-alert.sh).\n# Seeded by the installer from ALERT_EMAIL; the console Admin tab owns it now.\n%s\n' \
+      "$ALERT_EMAIL" > /etc/ilexa/alerts.conf
+    chmod 644 /etc/ilexa/alerts.conf
+    log_info "alert destination seeded: $ALERT_EMAIL"
+  elif [ -e /etc/ilexa/alerts.conf ]; then
+    log_info "alert destination already configured — left as is"
+  else
+    log_warn "ALERT_EMAIL empty — scheduled-job alerts will be discarded until an address is set in the console (Admin tab)"
+  fi
+fi
+
 # rspamd neural training progress. Runs as ROOT (reads redis directly, no
 # message content). Exists because the neural module fails SILENTLY: when it
 # never reaches its training threshold -- or when a symbol-set change resets

@@ -201,6 +201,19 @@ collect_interactive() {
   PRIMARY_DOMAIN=$(tui_input "Primary virtual mail domain:" "${MAIL_FQDN#*.}") || md_abort
   EXTRA_DOMAINS=$(tui_input "Extra virtual domains (space-separated, or blank):" "") || md_abort
   ADMIN_EMAIL=$(tui_input "Admin / PostfixAdmin superadmin email:" "postmaster@$PRIMARY_DOMAIN") || md_abort
+  # Where scheduled jobs send alerts (feed refresh failures, SIEM export
+  # health, neural training milestones...). Asked separately from ADMIN_EMAIL
+  # because they are genuinely different roles -- the PostfixAdmin superadmin
+  # is a mailbox identity, this is a human who reads operational mail, and on
+  # a real deployment that is often a monitored address elsewhere. Defaults to
+  # ADMIN_EMAIL so answering nothing is still correct.
+  #
+  # This is seeded into /etc/ilexa/alerts.conf by 55-ilexa. Before it was
+  # asked, that file simply did not exist on a fresh install, so EVERY
+  # cron-alert.sh notification was silently discarded until someone found the
+  # setting in the console's Admin tab -- which nobody does before the first
+  # failure they needed to hear about.
+  ALERT_EMAIL=$(tui_input "Email for system notifications/alerts (blank = none):" "$ADMIN_EMAIL") || md_abort
   ADMIN_PASSWORD=$(tui_password "PostfixAdmin superadmin password (blank = auto-generate):") || md_abort
   MAIL_STORE=$(tui_input "Maildir store root:" "/data/mail") || md_abort
   # Asked for explicitly: it drives the system clock, mail-log timestamps, cron
@@ -386,6 +399,9 @@ apply_defaults() {
   : "${ENABLE_UNOFFICIAL_SIGS:=yes}"
   : "${ENABLE_MX_CHECK:=yes}"; : "${ENABLE_KNOWN_SENDERS:=yes}"
   : "${ENABLE_MTA_STS:=yes}"; : "${MTA_STS_MODE:=enforce}"; : "${TLSRPT_RUA:=$ADMIN_EMAIL}"
+  # Answers-file runs never see the interactive prompt, so an answers file
+  # written before ALERT_EMAIL existed must still end up with working alerts.
+  : "${ALERT_EMAIL:=$ADMIN_EMAIL}"
   : "${ENABLE_IPV6:=no}"
   if [ "$ENABLE_IPV6" = yes ]; then INET_PROTOCOLS=all; MYNETWORKS="127.0.0.0/8, [::1]/128"
   else INET_PROTOCOLS=ipv4; MYNETWORKS="127.0.0.0/8"; fi
@@ -505,7 +521,7 @@ validate() {
 
 export_config() {
   # export answer vars for module subprocesses
-  export MAIL_FQDN MAIL_HOSTNAME PRIMARY_DOMAIN EXTRA_DOMAINS ADMIN_EMAIL ADMIN_PASSWORD PFA_ADMIN_PASSWORD \
+  export MAIL_FQDN MAIL_HOSTNAME PRIMARY_DOMAIN EXTRA_DOMAINS ADMIN_EMAIL ALERT_EMAIL ADMIN_PASSWORD PFA_ADMIN_PASSWORD \
     MAIL_STORE TLS_MODE CERTBOT_METHOD TLS_CUSTOM_CERT TLS_CUSTOM_KEY GEOBLOCK_COUNTRIES \
     ENABLE_OTX OTX_API_KEY OTX_TRUSTED_CIDRS SPAMHAUS_DQS_KEY ABUSIX_API_KEY ENABLE_LAST_LOGIN ENABLE_FTS_XAPIAN ENABLE_UNATTENDED \
     ENABLE_MX_CHECK ENABLE_KNOWN_SENDERS ENABLE_HU_BRAND_GUARD \
@@ -529,6 +545,7 @@ FQDN:            $MAIL_FQDN
 Primary domain:  $PRIMARY_DOMAIN
 Extra domains:   ${EXTRA_DOMAINS:-(none)}
 Admin email:     $ADMIN_EMAIL
+Alert email:     ${ALERT_EMAIL:-(none — scheduled-job alerts disabled)}
 Mail store:      $MAIL_STORE
 TLS mode:        $TLS_MODE
 Spam tag/reject:  ${SPAM_ADD_HEADER:-4} / ${SPAM_REJECT:-15}

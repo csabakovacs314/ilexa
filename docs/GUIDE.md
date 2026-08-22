@@ -189,7 +189,8 @@ These are the keys in `answers.example.conf` (and the questions the wizard asks)
 ### Admin
 | Key | Meaning | Default |
 |-----|---------|---------|
-| `ADMIN_EMAIL` | PostfixAdmin superadmin login + alert destination | `postmaster@…` |
+| `ADMIN_EMAIL` | PostfixAdmin superadmin login | `postmaster@…` |
+| `ALERT_EMAIL` | Where scheduled jobs send alerts (feed-refresh failures, SIEM export health, neural training milestones). Seeded into `/etc/ilexa/alerts.conf`, which `cron-alert.sh` reads; **seed-only** — once the file exists the console's Admin tab owns it and a re-run will not overwrite it, including a deliberate "off". Blank disables alert mail entirely. Asked interactively, defaults to `ADMIN_EMAIL` | `$ADMIN_EMAIL` |
 | `ADMIN_PASSWORD` | Superadmin password (blank ⇒ auto-generated) | auto |
 | `PFA_ADMIN_PASSWORD` | `postfixadmin@<fqdn>` mailbox password (blank ⇒ auto-generated) | auto |
 
