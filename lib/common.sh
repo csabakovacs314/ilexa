@@ -83,6 +83,33 @@ preflight_host() {
     fi
   done
 
+  # PRODUCTION-HIJACK guard. A test/lab install given a REAL domain's FQDN
+  # takes that domain's mail the moment its DNS is pointed here (which
+  # Let's Encrypt issuance then REQUIRES): confirmed live 2026-08-22, when
+  # a disposable box installed as a production subdomain silently swallowed
+  # that domain's inbound and every mail client configured with the
+  # hostname. If the FQDN or the domain's MX currently resolves to an
+  # address that is NOT on this host, this is either a not-yet-updated DNS
+  # (fine, expected on a fresh deploy) or an active production domain being
+  # cannibalised -- the operator is the only one who knows which, so say it
+  # LOUDLY and continue.
+  if [ -n "${MAIL_FQDN:-}" ]; then
+    local fqdn_ips my_ips other
+    fqdn_ips=$(dig +short A "$MAIL_FQDN" 2>/dev/null | grep -E '^[0-9.]+$' | sort -u)
+    my_ips=$(ip -4 -o addr show 2>/dev/null | awk '{print $4}' | cut -d/ -f1 | sort -u)
+    if [ -n "$fqdn_ips" ]; then
+      other=$(comm -23 <(echo "$fqdn_ips") <(echo "$my_ips"))
+      if [ -n "$other" ]; then
+        log_warn "═════════════════════════════════════════════════════════════"
+        log_warn "$MAIL_FQDN currently resolves to: $(echo "$other" | tr '\n' ' ')-- NOT this host."
+        log_warn "If that is a LIVE mail server, pointing DNS here will HIJACK"
+        log_warn "its mail and every client configured with this hostname."
+        log_warn "Only proceed with a hostname this install is meant to own."
+        log_warn "═════════════════════════════════════════════════════════════"
+      fi
+    fi
+  fi
+
   # Every module's pkg_install/pkg_try eventually hits dnf; failing that deep
   # into the run (after the wizard and every earlier module) is the same
   # lateness this function exists to fix. Warn-only: a stale local mirror or
