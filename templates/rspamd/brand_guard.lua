@@ -1,6 +1,11 @@
--- brand_guard.lua — HU_BRAND_DN_SPOOF: the From display-name claims a
--- protected brand (OTP, Magyar Posta, ...) but the From-domain is not one of
--- that brand's real domains.
+-- brand_guard.lua — brand impersonation checks against a foreign From-domain:
+--   HU_BRAND_DN_SPOOF   (2.5) From display-name claims a protected brand
+--                             (OTP, Magyar Posta, PayPal, ...), fuzzily
+--   HU_BRAND_ADDR_SPOOF (1.0) From localpart claims one (magyarposta@gmail.com)
+--   HU_BRAND_SUBJ_SPOOF (1.0) Subject names one plainly (weak: webshops
+--                             legitimately write "GLS", accountants "NAV")
+--   HU_BRAND_SUBJ_OBFUS (3.0) Subject names one only after homoglyph/digit
+--                             folding ("0TP", Cyrillic) — deliberate disguise
 --
 -- This is the fuzzy companion of the HU_BRAND_NAME/HU_BRAND_FROMDOM multimap
 -- pair: where the multimap needs the literal brand string, this rule also
@@ -115,32 +120,41 @@ end
 
 if #brands == 0 then return end
 
-local function brand_guard_cb(task)
-  -- Authenticated submissions are our own users; the spoof economics only
-  -- exist for inbound mail.
-  if task:get_user() then return false end
+-- Like normalize() but WITHOUT the homoglyph and digit folds: what an honest
+-- writer could plausibly have typed (accents and case still fold — "MÁV" is
+-- a plain mention, not obfuscation). Text that names a brand only under
+-- normalize() but not under normalize_plain() was deliberately disguised.
+local function normalize_plain(s)
+  s = tostring(rspamd_util.transliterate(s) or '')
+  s = s:lower()
+  s = s:gsub('[^a-z0-9]+', ' ')
+  s = s:gsub('^%s+', ''):gsub('%s+$', '')
+  return s
+end
 
-  local from = task:get_from('mime')
-  if not from or not from[1] then return false end
-  local dn = from[1].name
-  if not dn or #dn < 2 then return false end
-  local fdom = (from[1].domain or ''):lower()
-  if fdom == '' then return false end
-  local tld = rspamd_util.get_tld(fdom) or fdom
+-- Word-containment of a non-exact variant in normalized text.
+-- Exact-only ("=") variants are dictionary words (visa, apple, meta...):
+-- meaningful for a whole display name, meaningless inside a subject or a
+-- localpart, so they are skipped here.
+local function contains_variant(norm)
+  local padded = ' ' .. norm .. ' '
+  for _, b in ipairs(brands) do
+    for _, vt in ipairs(b.variants) do
+      if not vt.exact and padded:find(' ' .. vt.v .. ' ', 1, true) then
+        return b, vt.v
+      end
+    end
+  end
+  return nil
+end
 
-  -- Genuine brand mail (and cross-brand mentions between genuine brand
-  -- domains, e.g. a bank newsletter naming another bank) is never a spoof.
-  if all_domains[fdom] or all_domains[tld] then return false end
-
-  local dn_norm = normalize(dn)
-  if #dn_norm < 3 or #dn_norm > 120 then return false end
-  local padded = ' ' .. dn_norm .. ' '
+local function check_display_name(dn_norm)
   local tokens = {}
   for t in dn_norm:gmatch('%S+') do
     tokens[#tokens + 1] = t
     if #tokens >= 12 then break end
   end
-
+  local padded = ' ' .. dn_norm .. ' '
   for _, b in ipairs(brands) do
     for _, vt in ipairs(b.variants) do
       local v, hit = vt.v, false
@@ -157,19 +171,91 @@ local function brand_guard_cb(task)
           end
         end
       end
-      if hit then
-        return true, 1.0, string.format('%s:%s:%s', b.id, v, tld)
+      if hit then return b, v end
+    end
+  end
+  return nil
+end
+
+local function brand_guard_cb(task)
+  -- Authenticated submissions are our own users; the spoof economics only
+  -- exist for inbound mail.
+  if task:get_user() then return end
+
+  local from = task:get_from('mime')
+  if not from or not from[1] then return end
+  local fdom = (from[1].domain or ''):lower()
+  if fdom == '' then return end
+  local tld = rspamd_util.get_tld(fdom) or fdom
+
+  -- Genuine brand mail (and cross-brand mentions between genuine brand
+  -- domains, e.g. a bank newsletter naming another bank) is never a spoof.
+  if all_domains[fdom] or all_domains[tld] then return end
+
+  -- 1. Display name: fuzzy (containment + levenshtein), the strongest claim.
+  local dn = from[1].name
+  if dn and #dn >= 2 then
+    local dn_norm = normalize(dn)
+    if #dn_norm >= 3 and #dn_norm <= 120 then
+      local b, v = check_display_name(dn_norm)
+      if b then
+        task:insert_result('HU_BRAND_DN_SPOOF', 1.0,
+          string.format('%s:%s:%s', b.id, v, tld))
       end
     end
   end
-  return false
+
+  -- 2. From-address localpart claiming a brand (magyarposta@gmail.com).
+  local lp = from[1].user
+  if lp and #lp >= 3 and #lp <= 100 then
+    local b, v = contains_variant(normalize(lp))
+    if b then
+      task:insert_result('HU_BRAND_ADDR_SPOOF', 1.0,
+        string.format('%s:%s:%s', b.id, v, tld))
+    end
+  end
+
+  -- 3. Subject naming a brand. A plain mention is weak evidence — webshops
+  -- legitimately write "GLS", accountants write "NAV" — but a mention that
+  -- only appears after homoglyph/digit folding ("0TP", Cyrillic МАV) is a
+  -- deliberate disguise and scores accordingly.
+  local subj = task:get_subject()
+  if subj and #subj >= 3 then
+    if #subj > 400 then subj = subj:sub(1, 400) end
+    local full = normalize(subj)
+    if #full >= 3 then
+      local b, v = contains_variant(full)
+      if b then
+        local plain = normalize_plain(subj)
+        local sym = (' ' .. plain .. ' '):find(' ' .. v .. ' ', 1, true)
+                    and 'HU_BRAND_SUBJ_SPOOF' or 'HU_BRAND_SUBJ_OBFUS'
+        task:insert_result(sym, 1.0, string.format('%s:%s:%s', b.id, v, tld))
+      end
+    end
+  end
 end
 
-rspamd_config:register_symbol({
-  name = 'HU_BRAND_DN_SPOOF',
-  type = 'normal',
+local parent_id = rspamd_config:register_symbol({
+  name = 'HU_BRAND_GUARD',
+  type = 'callback',
   callback = brand_guard_cb,
-  score = 2.5,
-  description = 'From display-name resembles a protected brand but the From-domain is not that brand',
+  score = 0.0,
+  description = 'Brand impersonation checks (display name, From localpart, Subject)',
   group = 'phishing',
 })
+
+for _, sym in ipairs({
+  { name = 'HU_BRAND_DN_SPOOF', score = 2.5,
+    description = 'From display-name resembles a protected brand but the From-domain is not that brand' },
+  { name = 'HU_BRAND_ADDR_SPOOF', score = 1.0,
+    description = 'From-address localpart claims a protected brand from a foreign domain' },
+  { name = 'HU_BRAND_SUBJ_SPOOF', score = 1.0,
+    description = 'Subject names a protected brand but the sender is a foreign domain' },
+  { name = 'HU_BRAND_SUBJ_OBFUS', score = 3.0,
+    description = 'Subject names a protected brand in disguised form (homoglyph/digit tricks) from a foreign domain' },
+}) do
+  rspamd_config:register_symbol({
+    name = sym.name, type = 'virtual', parent = parent_id,
+    score = sym.score, description = sym.description, group = 'phishing',
+  })
+end
