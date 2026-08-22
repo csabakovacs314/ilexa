@@ -13,7 +13,7 @@
       "domains": ["kh.hu", "khbank.hu"] },
     { "id": "erste", "name": "Erste Bank",
       "variants": ["erste", "erste bank"],
-      "domains": ["erstebank.hu"] },
+      "domains": ["erstebank.hu", "ersteinvestment.hu"] },
     { "id": "raiffeisen", "name": "Raiffeisen Bank",
       "variants": ["raiffeisen"],
       "domains": ["raiffeisen.hu"] },

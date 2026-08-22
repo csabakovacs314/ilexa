@@ -11,6 +11,7 @@ posta.hu
 kh.hu
 khbank.hu
 erstebank.hu
+ersteinvestment.hu
 raiffeisen.hu
 revolut.com
 wise.com
