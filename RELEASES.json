@@ -1,8 +1,30 @@
 {
     "schema": 1,
-    "serial": 5,
+    "serial": 6,
     "channel": "stable",
     "releases": [
+        {
+            "version": "1.0.5",
+            "codename": "Duna",
+            "tag": "v1.0.5",
+            "released_at": "2026-08-25",
+            "commit": "72cb186",
+            "severity": "fix",
+            "requires_installer": false,
+            "min_upgrade_from": "0.0.0",
+            "schema_version": {
+                "mysql": 1,
+                "iocs": 2,
+                "logins": 3
+            },
+            "app_tarball": {
+                "path": "assets/ilexa-app.tar.gz",
+                "sha256": "86d00a8aebdd95c0faa844af0f5b6663da4fbc7437666cf72d2e6236c0f5611e",
+                "size": 1880851
+            },
+            "notes_hu": "Frissites utani verziojelzo javitasa; a sikertelen frissites mar nem jelent visszaallitast.",
+            "notes_en": "Fix the version tile going blank after an update; failed attempts no longer report a rollback that never happened."
+        },
         {
             "version": "1.0.4",
             "codename": "Duna",
@@ -114,6 +136,6 @@
             "notes_en": "Baseline release: version display, update checking, database migration framework."
         }
     ],
-    "latest": "1.0.4",
-    "generated_at": "2026-08-25T18:06:37Z"
+    "latest": "1.0.5",
+    "generated_at": "2026-08-25T18:10:30Z"
 }
