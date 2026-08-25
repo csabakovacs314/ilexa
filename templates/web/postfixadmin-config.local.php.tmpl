@@ -53,7 +53,20 @@ $CONF['footer_link']      = '@@ILEXA_URL_PREFIX@@';
 // Bootstrap overrides that match the console's palette. header.tpl emits this
 // after theme_css, and it is served same-origin so the page's own CSP
 // (style-src 'self') allows it.
-$CONF['theme_custom_css'] = 'css/ilexa.css';
+// Cache-buster keyed on the stylesheet's own mtime. Apache serves this file
+// with NO Cache-Control header (only an ETag), so browsers cache it
+// heuristically and can keep painting a stale stylesheet long after an
+// update -- confirmed live 2026-08-23, when a deployed CSS change was
+// correct at the origin but invisible in the browser. Keying the URL on
+// mtime makes each edit a new URL, so changes appear immediately while
+// unchanged files still cache normally.
+// PFASmarty prepends $rel_path and runs htmlentities() over this value;
+// htmlentities leaves '?' and '=' alone, so keep it to ONE parameter (an
+// '&' would come back as '&amp;').
+$_ilexa_css       = 'css/ilexa.css';
+$_ilexa_css_mtime = @filemtime(__DIR__ . '/public/' . $_ilexa_css);
+$CONF['theme_custom_css'] = $_ilexa_css . ($_ilexa_css_mtime ? '?v=' . $_ilexa_css_mtime : '');
+unset($_ilexa_css, $_ilexa_css_mtime);
 $CONF['database_type'] = 'mysqli';
 $CONF['database_host'] = '127.0.0.1';
 $CONF['database_user'] = '@@DB_USER@@';
@@ -62,3 +75,11 @@ $CONF['database_name'] = 'postfix';
 // domain_in_mailbox=YES => maildirs generated as domain/user@domain/ (full form),
 // matching Dovecot's %u lookup (short form makes delivered mail invisible).
 $CONF['domain_in_mailbox'] = 'YES';
+
+// Password expiry (PostfixAdmin's own feature, DOCUMENTS/Password_Expiration.md).
+// This flag alone does not compute anything -- it only lets PostfixAdmin's own
+// password-change path recompute mailbox.password_expiry going forward. The
+// per-domain interval is a DB column, not a config value; seed_postfixadmin()
+// (modules/50-web.sh) sets it for every domain this installer creates, using
+// the same PASSWORD_EXPIRY_DAYS answer this flag is derived from.
+$CONF['password_expiration'] = '@@PASSWORD_EXPIRATION_ENABLED@@';

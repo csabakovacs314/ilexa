@@ -14,6 +14,11 @@ NoNewPrivileges=true
 PrivateTmp=true
 ProtectSystem=strict
 ProtectHome=true
+# 2026-08-18: raised from the Phase 0 stub's 64M. Measured standalone
+# (load lid.176.ftz + run inference, no HTTP server): peak_rss=37.4MB.
+# Budgeted with real headroom above that for the HTTP server/thread
+# overhead and future growth (naturalness/spam n-gram tables land here
+# next) rather than re-deriving from a single measurement.
 MemoryMax=200M
 MemoryHigh=160M
 OOMPolicy=stop

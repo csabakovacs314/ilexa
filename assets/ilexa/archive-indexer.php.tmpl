@@ -81,7 +81,7 @@ foreach (preg_split('/\n?\f\n?/', $out) as $rec) {
     $unf = preg_replace('/\n[ \t]+/', ' ', $hdrs);
 
     $from = mb_substr(decode_hdr(hdr($unf, 'From')), 0, 320, 'UTF-8');
-    $to   = mb_substr(decode_hdr(hdr($unf, 'To')),   0, 320, 'UTF-8');
+    $to   = mb_substr(decode_hdr(recipient($unf, $hdrs)), 0, 320, 'UTF-8');
     $subj = mb_substr(decode_hdr(hdr($unf, 'Subject')), 0, 512, 'UTF-8');
     [$score, $spam] = verdict($unf);
 
@@ -164,6 +164,43 @@ function geoip_cc(string $ip): string {
     $out = shell_exec('mmdblookup --file ' . escapeshellarg($db)
                     . ' --ip ' . escapeshellarg($ip) . ' country iso_code 2>/dev/null');
     return ($out !== null && preg_match('/"([A-Z]{2})"/', $out, $m)) ? $m[1] : '';
+}
+
+// Recipient shown by the console's Archive list. To: stays primary -- it is what
+// the sender visibly addressed -- but it is absent on BCC'd and bulk mail, which
+// left 33 of 4,833 archived messages with a blank recipient column (measured
+// 2026-08-25).
+//
+// Fallbacks, ordered by how well each answers "who did this server deliver to":
+//   1. To:             unchanged, the conventional display recipient
+//   2. Received "for"  the ENVELOPE recipient our own MTA recorded -- covered 22
+//                      of those 33, where To: and Cc: were both absent
+//   3. Cc:             last resort; covered exactly 1 of the 33
+// 10 of the 33 carry none of these and stay empty; the view renders those as an
+// explicit "unknown" rather than a blank cell.
+//
+// The "for" clause is read from the RAW headers, FIRST match wins. It is
+// deliberately NOT restricted to the topmost Received the way
+// topmost_received_ip() is: because the archive is fed by always_bcc, the
+// topmost Received is our own re-injection hop and usually carries no "for" at
+// all -- the envelope recipient sits in the next one down. Restricting to the
+// topmost recovered only 12 of the 33 rows; scanning down recovers 23.
+//
+// Residual risk, stated plainly: Postfix folds a message's first DATA line onto
+// the topmost Received when that line begins with space/TAB, so a sender can get
+// text into this block and could forge a "for <...>". The consequence is a wrong
+// address displayed in an admin-only, GDPR-gated list -- not a disclosure or an
+// escalation. It is also not a new trust class: To: and Cc:, which this backs
+// up and which the column already trusted, are wholly sender-controlled too.
+function recipient(string $unf, string $rawHdrs): string {
+    $to = trim(hdr($unf, 'To'));
+    if ($to !== '') return $to;
+    if (preg_match('/\bfor\s+<([^>\s@]+@[^>\s]+)>/i', $rawHdrs, $f)) {
+        return $f[1];
+    }
+    $cc = trim(hdr($unf, 'Cc'));
+    if ($cc !== '') return $cc;
+    return '';
 }
 
 function hdr(string $unf, string $name): string {

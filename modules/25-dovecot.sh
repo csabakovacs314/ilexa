@@ -261,7 +261,12 @@ if [ "$FTS_OK" = 1 ]; then
 plugin {
   fts = xapian
   fts_xapian = partial=3 full=20 verbose=0
-  fts_message_max_size = 5M
+  # NOT set here on purpose: fts_message_max_size. It looks like a body-size cap
+  # and this file used to ship it, but Dovecot 2.3.x does not implement it (it is
+  # 2.4/Pro) and an unknown key inside plugin {} is silently ignored -- so it
+  # capped nothing while making the 2026-07-03 indexer runaway look solved.
+  # fts-xapian 1.5.5 has no size cap either (`attachments=` is a legacy no-op).
+  # Verified 2026-08-25 by grepping the installed binaries and reading the source.
   fts_autoindex = yes
   fts_autoindex_exclude = \Trash
 }

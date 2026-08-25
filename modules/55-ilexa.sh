@@ -207,7 +207,13 @@ if [ "$DRY_RUN" != 1 ]; then
   # operator's later choice. Bare language code, no newline -- qa_lang()
   # trims, qa_lang_set() writes the same shape.
   if [ ! -e /var/cache/quarantine-admin/language ]; then
-    _lang="${ILEXA_LANG:-en}"
+    # SYSTEM_LANG is authoritative (it is what the operator answered);
+    # ILEXA_LANG is only the older name for it, honoured for answers
+    # files predating SYSTEM_LANG and for a standalone --only 55 run.
+    # This file is the RUNTIME source of truth all three web apps read,
+    # so seeding it from the wrong one would silently override the
+    # chosen system language for Roundcube and PostfixAdmin too.
+    _lang="${SYSTEM_LANG:-${ILEXA_LANG:-en}}"
     if [ ! -f "$SRC/lang/${_lang}.php" ]; then
       log_warn "no lang/${_lang}.php in the console bundle — seeding language 'en' instead"
       _lang=en
@@ -217,6 +223,25 @@ if [ "$DRY_RUN" != 1 ]; then
     chmod 644 /var/cache/quarantine-admin/language
     log_info "console language seeded: $_lang"
     unset _lang
+  fi
+  # Password-expiry master switch (Admin -> Jelszó-lejárati kényszerítés),
+  # seeded ONCE from the same PASSWORD_EXPIRY_DAYS answer that already drives
+  # PASSWORD_EXPIRATION_ENABLED (deploy_postfixadmin(), modules/50-web.sh) and
+  # seed_postfixadmin()'s per-domain days -- same on/off decision, expressed
+  # a third time because it also has to reach two things outside PHP's own
+  # config system: the Roundcube password_expiry plugin and the
+  # qa-password-expiry-notify.php cron job, both of which read this exact
+  # file directly, not a PostfixAdmin or ilexa setting. Console-owned state
+  # afterwards (Admin tab rewrites it), so seeded once, same discipline as
+  # the language file just above -- a module re-run must never reset an
+  # operator's later choice made through the console.
+  if [ ! -e /var/cache/quarantine-admin/password_expiry_enabled ]; then
+    if [ "${PASSWORD_EXPIRY_DAYS:-90}" = never ]; then _pwx=0; else _pwx=1; fi
+    printf '%s' "$_pwx" > /var/cache/quarantine-admin/password_expiry_enabled
+    chown "$WEB_USER:$WEB_GROUP" /var/cache/quarantine-admin/password_expiry_enabled
+    chmod 644 /var/cache/quarantine-admin/password_expiry_enabled
+    log_info "password-expiry enforcement seeded: $([ "$_pwx" = 1 ] && echo enabled || echo disabled)"
+    unset _pwx
   fi
 else
   log_info "[dry-run] would create /var/log|cache|lib quarantine-admin dirs"
@@ -435,6 +460,13 @@ fi
     echo "0 2 * * * root /usr/local/sbin/check-breaches.py >> /var/log/check-breaches.log 2>&1"
   echo "QA_DIGEST_TO=${ADMIN_EMAIL}"
   echo "0 7 * * 1 root /usr/local/sbin/qa-weekly-digest.php >> /var/log/qa-digest.log 2>&1"
+  # Skipped entirely when expiry is disabled: PostfixAdmin's own +0-days
+  # computation for "never" would leave every password_expiry sitting in the
+  # past, which never lands in a future 7/3/1-day window anyway (harmless),
+  # but there is no reason to run a daily DB sweep for a feature the operator
+  # explicitly turned off.
+  [ "${PASSWORD_EXPIRY_DAYS:-90}" != never ] && \
+    echo "0 6 * * * root /usr/local/sbin/qa-password-expiry-notify.php >> /var/log/qa-password-expiry-notify.log 2>&1"
   # GeoIP country DB (db-ip lite, monthly re-publish): feeds the archive/audit
   # country flags and archive_index.sender_cc. Day 2, after db-ip publishes.
   echo "20 3 2 * * root SOFT_FAIL_RC=75 /usr/bin/cron-alert.sh geoipdb /usr/local/sbin/qa-geoipdb-refresh.sh >> /var/log/qa-geoipdb.log 2>&1"
@@ -519,6 +551,13 @@ EOF
 # the header of local.d/neural.conf.
 write_file /etc/cron.d/qa-neural-snapshot 0644 root:root <<'EOF'
 MAILTO=""
+# rc=10 (first-ever training) and rc=11 (weekly shadow-mode reminder) are the
+# script's own delivery mechanism, not failures -- see qa-neural-snapshot.sh's
+# own comment at those exit points. INFO_RC tells cron-alert.sh to still mail
+# every occurrence (unlike SOFT_FAIL_RC, never suppressed or streak-tracked)
+# but label it "NOTICE", not "FAILED": without this, a healthy weekly nag
+# reads as a production outage.
+INFO_RC="10,11"
 41 5 * * * root /usr/bin/cron-alert.sh qa-neural-snapshot /usr/local/sbin/qa-neural-snapshot.sh
 EOF
 
@@ -557,6 +596,19 @@ MAILTO=""
 CRON_ALERT_STATE_DIR=/var/cache/quarantine-admin
 SOFT_FAIL_RC=1
 17 * * * * ${WEB_USER} /usr/bin/cron-alert.sh qa-feed-sample /usr/local/sbin/qa-feed-sample.php
+EOF
+
+# Login-anomaly ingestion sweep (see plans/zany-napping-sunrise.md). First
+# sub-hourly cron in this codebase, deliberately -- justified there:
+# successful logins are frequent enough that the daily/weekly cadence every
+# other job here uses would make "new sign-in" detection close to useless.
+# Same cron-alert.sh + CRON_ALERT_STATE_DIR + SOFT_FAIL_RC reasoning as
+# qa-feed-sample immediately above (apache cannot write /run either).
+write_file /etc/cron.d/qa-signin-monitor 0644 root:root <<EOF
+MAILTO=root
+CRON_ALERT_STATE_DIR=/var/cache/quarantine-admin
+SOFT_FAIL_RC=1
+*/5 * * * * ${WEB_USER} /usr/bin/cron-alert.sh qa-signin-monitor /usr/local/sbin/qa-signin-monitor.php
 EOF
 
 mark_done 55-ilexa

@@ -58,6 +58,25 @@ is_soft_rc() {
   return 1
 }
 
+# Some jobs use a non-zero exit as their OWN delivery mechanism, not to report
+# a failure: qa-neural-snapshot.sh exits 10/11 specifically so this wrapper's
+# "only mail on non-zero" rule carries a one-time training notice or a weekly
+# shadow-mode reminder to the inbox. That is a deliberate, correct use of this
+# wrapper's contract -- but it used to arrive as "[qa-neural-snapshot] FAILED
+# (rc=11)", which reads as an outage on a system that is working exactly as
+# designed, and sent someone investigating a problem that did not exist.
+#
+# Unlike SOFT_FAIL_RC, an info code is never suppressed or streak-tracked: a
+# weekly reminder that only mailed every OTHER week because it was waiting
+# out a threshold would defeat its own purpose. Every occurrence mails: only
+# the label changes, from FAILED to NOTICE.
+: "${INFO_RC:=}"                 # space/comma list of exit codes that are informational, not failures
+is_info_rc() {
+  local c
+  for c in ${INFO_RC//,/ }; do [ "$c" = "$1" ] && return 0; done
+  return 1
+}
+
 host="$(hostname -f 2>/dev/null || hostname)"
 out="$(mktemp)"
 # Separate file for the composed alert body: it is written once and then either
@@ -83,6 +102,31 @@ if [ "$rc" -eq 0 ]; then
     [ "${prev:-0}" -ge 1 ] && logger -t "$tag" "recovered after ${prev} consecutive soft failure(s)"
   fi
   exit 0
+fi
+
+# --- Non-zero, informational: always mail, never a "failure" -----------------
+# Checked before the soft-fail logic and bypasses it entirely -- an info code
+# is not part of any failure streak, so it must not arm, advance, or clear
+# one; touching $streak_file here would let two unrelated signals (a real
+# transient failure and a scheduled reminder for the same tag) corrupt each
+# other's state.
+if is_info_rc "$rc"; then
+  {
+    echo "Command:  $*"
+    echo "Host:     $host"
+    echo "Exit:     $rc  (informational -- not a failure; see command output)"
+    echo "Duration: ${dur}s"
+    echo "Time:     $(date '+%F %T %Z')"
+    echo
+    echo "----- output (stdout+stderr) -----"
+    cat "$out"
+  } > "$body"
+  if [ -z "$MAILTO" ]; then
+    logger -t "$tag" "NOTICE (rc=$rc) — no alert recipient configured, journal only (set one in the console's Admin tab)"
+    exit "$rc"
+  fi
+  mail -s "[$tag] NOTICE (rc=$rc) on $host" "$MAILTO" < "$body"
+  exit "$rc"
 fi
 
 # --- Non-zero: decide whether this failure is mail-worthy --------------------

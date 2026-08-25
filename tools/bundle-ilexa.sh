@@ -17,6 +17,16 @@ STAMP="$HERE/assets/ilexa-app.commit"
 [ -d "$SRC/src" ] && [ -f "$SRC/index.php" ] || {
   echo "bundle-ilexa: $SRC does not look like the ilexa app" >&2; exit 1; }
 
+# The update-check/apply pipeline reads these two files directly out of the
+# bundle -- refusing here, before anything is written, is cheaper than a
+# published release the version compare/dashboard silently mishandles.
+ver="$(tr -d '[:space:]' < "$SRC/VERSION" 2>/dev/null || true)"
+cname="$(tr -d '[:space:]' < "$SRC/CODENAME" 2>/dev/null || true)"
+[[ "$ver" =~ ^[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,4}$ ]] || {
+  echo "bundle-ilexa: $SRC/VERSION ('$ver') is not valid semver (X.Y.Z)" >&2; exit 1; }
+[ -n "$cname" ] || {
+  echo "bundle-ilexa: $SRC/CODENAME is empty" >&2; exit 1; }
+
 commit="$(git -C "$SRC" rev-parse --short HEAD 2>/dev/null || echo unknown)"
 dirty=""
 [ -n "$(git -C "$SRC" status --porcelain 2>/dev/null)" ] && dirty=" (uncommitted changes present)"

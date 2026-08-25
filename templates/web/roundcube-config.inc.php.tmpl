@@ -21,3 +21,29 @@ $config['plugins'] = array(@@RC_PLUGINS@@);
 $config['default_host'] = 'ssl://localhost';
 $config['smtp_server'] = 'ssl://localhost';
 $config['enable_installer'] = false;
+
+// ---- language: follow the ilexa console ------------------------------------
+// Same source of truth PostfixAdmin uses (see
+// templates/web/postfixadmin-config.local.php.tmpl): ilexa stores the
+// site-wide language as a bare 'hu'/'en' in this file and its Admin tab
+// rewrites it, so all three web apps move together instead of each freezing
+// whatever was chosen at install time.
+//
+// Roundcube wants an RFC1766 locale ('en_US'), not a bare code, and the value
+// reaches setlocale() and a localization PATH -- so it is resolved through a
+// fixed whitelist map, never used as read.
+//
+// This is a DEFAULT, not a lock: rcmail::set_user() loads the user's own
+// preferences into config before reading 'language', so anyone who picks a
+// language in Roundcube's own settings keeps it.
+$_sys_lang_file = '@@ILEXA_LANG_FILE@@';
+$_sys_lang      = '@@SYSTEM_LANG@@';
+if (is_readable($_sys_lang_file)) {
+    $_l = strtolower(trim((string) @file_get_contents($_sys_lang_file)));
+    if ($_l === 'en' || $_l === 'hu') {
+        $_sys_lang = $_l;
+    }
+}
+$_rc_locales = ['en' => 'en_US', 'hu' => 'hu_HU'];
+$config['language'] = $_rc_locales[$_sys_lang] ?? 'en_US';
+unset($_sys_lang_file, $_sys_lang, $_l, $_rc_locales);

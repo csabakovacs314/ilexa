@@ -44,7 +44,7 @@ admin_whitelist_env {
   regexp = true;
   symbol = "ADMIN_WHITELIST";
   score = -100.0;
-  description = "Envelope sender on the admin allowlist";
+  description = "Envelope sender on the admin whitelist";
 }
 admin_whitelist_hdr {
   type = "header";
@@ -54,14 +54,14 @@ admin_whitelist_hdr {
   regexp = true;
   symbol = "ADMIN_WHITELIST_HDR";
   score = -100.0;
-  description = "Visible From-header address on the admin allowlist";
+  description = "Visible From-header address on the admin whitelist";
 }
 admin_whitelist_ip {
   type = "ip";
   map = "@@ILEXA_LIST_DIR@@/whitelist_ip.map";
   symbol = "ADMIN_WHITELIST_IP";
   score = -100.0;
-  description = "Connecting IP on the admin allowlist";
+  description = "Connecting IP on the admin whitelist";
 }
 
 # ── Score-only IP reputation feeds ───────────────────────────────────────────
@@ -120,21 +120,28 @@ feed_firehol {
   type = "ip";
   map = "/etc/rspamd/local.d/maps.d/firehol.inc";
   symbol = "FEED_FIREHOL";
-  score = 3.0;
+  score = 1.5;
   description = "Connecting IP on FireHOL level1 (attackers/malware) — score only";
 }
 feed_abuseipdb {
   type = "ip";
   map = "/etc/rspamd/local.d/maps.d/abuseipdb.inc";
   symbol = "FEED_ABUSEIPDB";
-  score = 3.5;
-  description = "Connecting IP on AbuseIPDB (reported attack sources) — score only";
+  score = 2.0;
+  description = "Connecting IP on AbuseIPDB (confidence>=90) — score only";
+}
+feed_dshield {
+  type = "ip";
+  map = "/etc/rspamd/local.d/maps.d/dshield.inc";
+  symbol = "FEED_DSHIELD";
+  score = 2.0;
+  description = "Connecting IP on DShield/SANS ISC top-attacker list — score only";
 }
 feed_et {
   type = "ip";
   map = "/etc/rspamd/local.d/maps.d/emergingthreats.inc";
   symbol = "FEED_ET";
-  score = 2.5;
+  score = 1.5;
   description = "Connecting IP on EmergingThreats compromised-ips — score only";
 }
 

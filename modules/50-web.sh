@@ -148,11 +148,18 @@ seed_postfixadmin() {
     || log_warn "superadmin seed failed"
 
   local d
+  # Days, not the "never" tag: 0 is the same value PostfixAdmin's own schema
+  # default already uses, and $CONF['password_expiration']=NO (set above in
+  # deploy_postfixadmin()) makes it inert either way. Only in the INSERT's
+  # VALUES, never in ON DUPLICATE KEY UPDATE -- a re-run must not stomp an
+  # operator's own later change to an existing domain's value back to the
+  # install-time default (same discipline the untouched columns here follow).
+  local d_expiry_days; [ "${PASSWORD_EXPIRY_DAYS:-90}" = never ] && d_expiry_days=0 || d_expiry_days="${PASSWORD_EXPIRY_DAYS:-90}"
   for d in $PRIMARY_DOMAIN $EXTRA_DOMAINS; do
-    db_exec "INSERT INTO domain (domain,description,aliases,mailboxes,maxquota,quota,transport,backupmx,active,created,modified)
-             VALUES ('$d','$d',0,0,0,0,'virtual',0,1,NOW(),NOW())
+    db_exec "INSERT INTO domain (domain,description,aliases,mailboxes,maxquota,quota,transport,backupmx,active,password_expiry,created,modified)
+             VALUES ('$d','$d',0,0,0,0,'virtual',0,1,$d_expiry_days,NOW(),NOW())
              ON DUPLICATE KEY UPDATE active=1,modified=NOW();" postfix \
-      && log_info "domain seeded: $d" || log_warn "domain seed failed: $d"
+      && log_info "domain seeded: $d (password_expiry=$d_expiry_days days)" || log_warn "domain seed failed: $d"
     db_exec "INSERT IGNORE INTO domain_admins (username,domain,created,active)
              VALUES ('$ADMIN_EMAIL','$d',NOW(),1);" postfix
   done
@@ -256,7 +263,7 @@ deploy_postfixadmin() {
   # default mirrors ilexa's LANG_DEFAULT for when the file does not exist yet
   # (a fresh install, before anyone has touched the language selector).
   setvar ILEXA_LANG_FILE "/var/cache/quarantine-admin/language"
-  setvar ILEXA_LANG_DEFAULT "hu"
+  setvar ILEXA_LANG_DEFAULT "${SYSTEM_LANG:-${ILEXA_LANG:-en}}"
   setvar ILEXA_URL_PREFIX "$ILEXA_URL_PREFIX"
   setvar MAIL_FQDN "$MAIL_FQDN"
   # Same postmaster@<domain> identity 55-ilexa already uses as its own
@@ -266,6 +273,8 @@ deploy_postfixadmin() {
   # public/users/password-recover.php sends -- Gmail (correctly) DMARC-
   # rejects that as unauthenticated. Confirmed live on hawking 2026-08-21.
   setvar POSTMASTER_EMAIL "postmaster@${PRIMARY_DOMAIN}"
+  if [ "${PASSWORD_EXPIRY_DAYS:-90}" = never ]; then setvar PASSWORD_EXPIRATION_ENABLED NO
+  else setvar PASSWORD_EXPIRATION_ENABLED YES; fi
   # Upstream 4.0.1 bug (still present as of 2026-08): the password-recovery
   # flow's init_session() call omits the mfa_complete argument, so EVERY
   # user landing from a reset link -- TOTP configured or not, $CONF totp NO
@@ -284,6 +293,47 @@ deploy_postfixadmin() {
         || die "PFA password-change.php patch broke the file -- aborting"
     else
       log_warn "PFA password-change.php has a different shape than ${PA_VER}'s known MFA bug -- verify the recovery flow manually"
+    fi
+  fi
+  # Recovery email required at mailbox creation. Hand-patch on vendored
+  # PostfixAdmin core: MailboxHandler::preSave() (model/MailboxHandler.php) is
+  # the only hook available -- PFAHandler::pacol() (the generic field-struct
+  # declarator every other field here uses) has no `required` flag to lean on
+  # instead (checked). Same guarded shape as the MFA patch above: grep the
+  # exact line this targets, sed it, php -l the result, die loudly rather than
+  # silently half-patch if a future PA_VER has reshaped the method.
+  #
+  # Independent of PASSWORD_EXPIRY_DAYS/password_expiration: a recovery
+  # address is useful on its own (PostfixAdmin's own password-recover.php,
+  # Roundcube's secondary_email plugin), so this is unconditional, not gated
+  # on expiry being enabled.
+  if [ "$DRY_RUN" != 1 ] && [ -f "$dir/model/MailboxHandler.php" ]; then
+    if grep -q "protected function preSave(): bool" "$dir/model/MailboxHandler.php"; then
+      if ! grep -q "Installer patch (password-expiry Phase 2)" "$dir/model/MailboxHandler.php"; then
+        php -r '
+          $f = $argv[1];
+          $s = file_get_contents($f);
+          $anchor = "protected function preSave(): bool\n    {\n";
+          $inject = $anchor .
+            "        // Installer patch (password-expiry Phase 2): a mailbox with no\n" .
+            "        // recovery address cannot use PostfixAdmin'"'"'s own password-recover.php\n" .
+            "        // and is a permanent-lockout risk under any future expiry enforcement.\n" .
+            "        // \$this->new is true only for a brand-new row -- editing an existing\n" .
+            "        // mailbox is never blocked by this, even if email_other was already empty.\n" .
+            "        if (\$this->new && trim((string)(\$this->values[\"email_other\"] ?? \"\")) === \"\") {\n" .
+            "            \$this->errormsg[] = Config::lang_f(\"missing_field\", Config::lang(\"pCreate_mailbox_email\"));\n" .
+            "            return false;\n" .
+            "        }\n";
+          if (strpos($s, $anchor) === false) { fwrite(STDERR, "anchor not found\n"); exit(1); }
+          file_put_contents($f, str_replace($anchor, $inject, $s, $count));
+          exit($count === 1 ? 0 : 1);
+        ' "$dir/model/MailboxHandler.php" \
+          && php -l "$dir/model/MailboxHandler.php" >/dev/null 2>&1 \
+          && log_info "PostfixAdmin: recovery email required at mailbox creation (patched)" \
+          || die "PFA MailboxHandler.php preSave() patch failed or broke the file -- aborting"
+      fi
+    else
+      log_warn "PFA MailboxHandler.php has a different preSave() shape than ${PA_VER}'s known one -- recovery-email requirement NOT applied, verify manually"
     fi
   fi
   render "$MD_TEMPLATES/web/postfixadmin-config.local.php.tmpl" "$dir/config.local.php"
@@ -351,9 +401,15 @@ deploy_roundcube() {
     log_info "reusing saved Roundcube des_key (re-run would otherwise drop every webmail session)"
   fi
   setvar DES_KEY "$RC_DES_KEY"
-  rc_plugins="'archive', 'zipdownload', 'password', 'secondary_email', 'forgot_password_link', 'markasjunk', 'markasjunk_ham_everywhere', 'newmail_notifier', 'attachment_reminder'"
+  rc_plugins="'archive', 'zipdownload', 'password', 'secondary_email', 'password_expiry', 'forgot_password_link', 'markasjunk', 'markasjunk_ham_everywhere', 'newmail_notifier', 'attachment_reminder'"
   [ "$ENABLE_SIEVE" = yes ] && rc_plugins="$rc_plugins, 'managesieve'"
   setvar RC_PLUGINS "$rc_plugins"
+  # Language: the rendered config reads ilexa's own language file at runtime
+  # (same file PostfixAdmin follows), with the install-time answer as the
+  # fallback for when it is missing. Set here, not inherited from
+  # deploy_postfixadmin, which can return early before its own setvars run.
+  setvar ILEXA_LANG_FILE "/var/cache/quarantine-admin/language"
+  setvar SYSTEM_LANG "${SYSTEM_LANG:-${ILEXA_LANG:-en}}"
   render "$MD_TEMPLATES/web/roundcube-config.inc.php.tmpl" "$dir/config/config.inc.php"
   # managesieve (bundled in -complete.tar.gz): only rendered when the plugin
   # is actually in $rc_plugins above (ENABLE_SIEVE=yes and Dovecot's
@@ -383,6 +439,19 @@ deploy_roundcube() {
     cp -a "$MD_ASSETS/roundcube-secondary-email/." "$dir/plugins/secondary_email/"
   fi
   render "$MD_TEMPLATES/web/roundcube-secondary-email-config.inc.php.tmpl" "$dir/plugins/secondary_email/config.inc.php"
+  # password_expiry plugin: reads mailbox.password_expiry every login and
+  # either hard-redirects (already expired -- seeds the STOCK password
+  # plugin's own $_SESSION['password_expires'] rather than inventing its own
+  # expired-password messaging) or shows a dismissible banner (within
+  # password_expiry_warn_days). Webmail-only; has no effect on IMAP/POP3/
+  # SMTP clients. Same DSN as secondary_email above (postfix's own app-level
+  # DB user), not a new grant -- see the config template's own comment for
+  # why. Also not part of the stock tarball.
+  if [ "$DRY_RUN" != 1 ]; then
+    install -d "$dir/plugins/password_expiry"
+    cp -a "$MD_ASSETS/roundcube-password-expiry/." "$dir/plugins/password_expiry/"
+  fi
+  render "$MD_TEMPLATES/web/roundcube-password-expiry-config.inc.php.tmpl" "$dir/plugins/password_expiry/config.inc.php"
   # forgot_password_link plugin: puts a link to PostfixAdmin's own
   # password-recover.php on Roundcube's login page (via the login skin's
   # <roundcube:container name="loginfooter"> insertion point) -- without
@@ -418,14 +487,14 @@ deploy_roundcube() {
   render "$MD_TEMPLATES/web/roundcube-newmail-notifier-config.inc.php.tmpl" "$dir/plugins/newmail_notifier/config.inc.php"
   if [ "$DRY_RUN" != 1 ]; then
     chown -R "root:$WEB_GROUP" "$dir/config" "$dir/plugins/password/config.inc.php" "$dir/plugins/secondary_email" \
-      "$dir/plugins/forgot_password_link" "$dir/plugins/markasjunk/config.inc.php" "$dir/plugins/markasjunk_ham_everywhere" \
-      "$dir/plugins/newmail_notifier/config.inc.php" 2>/dev/null || true
+      "$dir/plugins/password_expiry" "$dir/plugins/forgot_password_link" "$dir/plugins/markasjunk/config.inc.php" \
+      "$dir/plugins/markasjunk_ham_everywhere" "$dir/plugins/newmail_notifier/config.inc.php" 2>/dev/null || true
     chmod 640 "$dir/config/config.inc.php" "$dir/plugins/password/config.inc.php" "$dir/plugins/secondary_email/config.inc.php" \
-      "$dir/plugins/forgot_password_link/config.inc.php" "$dir/plugins/markasjunk/config.inc.php" \
-      "$dir/plugins/newmail_notifier/config.inc.php" 2>/dev/null || true
+      "$dir/plugins/password_expiry/config.inc.php" "$dir/plugins/forgot_password_link/config.inc.php" \
+      "$dir/plugins/markasjunk/config.inc.php" "$dir/plugins/newmail_notifier/config.inc.php" 2>/dev/null || true
     chown "$WEB_USER:$WEB_GROUP" "$dir/plugins/password/config.inc.php" "$dir/plugins/secondary_email/config.inc.php" \
-      "$dir/plugins/forgot_password_link/config.inc.php" "$dir/plugins/markasjunk/config.inc.php" \
-      "$dir/plugins/newmail_notifier/config.inc.php"   # plugins re-read as the web user
+      "$dir/plugins/password_expiry/config.inc.php" "$dir/plugins/forgot_password_link/config.inc.php" \
+      "$dir/plugins/markasjunk/config.inc.php" "$dir/plugins/newmail_notifier/config.inc.php"   # plugins re-read as the web user
     # Only on a genuinely empty database. This ran on every re-run, replaying
     # Roundcube's CREATE TABLE script against an already-populated schema: not
     # destructive (the statements just fail) but it filled the log with MySQL
@@ -463,10 +532,38 @@ deploy_roundcube() {
   fi
 }
 
+# --- Landing page: domain-root gateway to Roundcube + ilexa ----------------
+# Deliberately does NOT rely on deploy_postfixadmin's own MD_VAR_ILEXA_LANG_*
+# setvars: that function has early `return 0` paths (download/checksum
+# failure) that skip past them, and this page must still render even when
+# PostfixAdmin itself failed to install. Same literal constants as
+# postfixadmin-config.local.php.tmpl, set independently here.
+# The ilexa card hides itself (SHOW_ILEXA) when the console is disabled;
+# Roundcube is unconditional, matching deploy_roundcube above.
+deploy_landing_page() {
+  setvar ILEXA_LANG_FILE "/var/cache/quarantine-admin/language"
+  setvar ILEXA_LANG_DEFAULT "${SYSTEM_LANG:-${ILEXA_LANG:-en}}"
+  setvar ILEXA_URL_PREFIX "$ILEXA_URL_PREFIX"
+  setvar MAIL_FQDN "$MAIL_FQDN"
+  if [ "${ENABLE_ILEXA:-yes}" = yes ]; then setvar SHOW_ILEXA true; else setvar SHOW_ILEXA false; fi
+  render "$MD_TEMPLATES/web/landing.php.tmpl" "$WWW/index.php"
+  [ "$DRY_RUN" != 1 ] && chown root:root "$WWW/index.php" && chmod 644 "$WWW/index.php"
+  # Full wordmark lockup the page references at /assets/ilexa-logo-lockup.png
+  # -- a real static file (53KB), not inlined: this installer's own copy, not
+  # the app bundle's (unpacked later, by 55-ilexa, and behind its Basic Auth
+  # besides -- see the comment above on why this page can't depend on it).
+  if [ "$DRY_RUN" != 1 ]; then
+    install -d -m 0755 -o root -g root "$WWW/assets"
+    install -m 0644 -o root -g root "$MD_ASSETS/web/ilexa-logo-lockup.png" "$WWW/assets/ilexa-logo-lockup.png"
+  else
+    log_info "[dry-run] would install $WWW/assets/ilexa-logo-lockup.png"
+  fi
+}
 
 deploy_postfixadmin
 seed_postfixadmin
 deploy_roundcube
+deploy_landing_page
 if [ "$DRY_RUN" != 1 ]; then
   # apachectl is the same binary/symlink name on both platforms (confirmed
   # on a real 24.04 host: apache2-bin ships /usr/sbin/apachectl too).
@@ -475,4 +572,4 @@ if [ "$DRY_RUN" != 1 ]; then
 fi
 
 mark_done 50-web
-log_info "web stack deployed (Roundcube webmail, PostfixAdmin)"
+log_info "web stack deployed (Roundcube webmail, PostfixAdmin, landing page)"

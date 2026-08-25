@@ -108,6 +108,24 @@ tui_yesno() { # prompt  -> returns 0 for yes, 1 for no
   else return 0; fi
 }
 
+# tui_radiolist "title" tag1 "desc1" on|off  tag2 "desc2" on|off ...
+# Single-select (exactly one tag marked 'on'); echoes that one tag. For a flat
+# pick-one, chaining tui_yesno calls (TLS_MODE's precedent) reads badly and
+# invites logic errors as the option count grows -- whiptail's own --radiolist
+# is the right primitive here.
+tui_radiolist() {
+  local title="$1"; shift
+  if _tui_ok; then
+    local args=() ; while [ $# -ge 3 ]; do args+=("$1" "$2" "$3"); shift 3; done
+    whiptail --backtitle "$MD_TUI_BACKTITLE" --title "$title" --cancel-button "Exit" \
+      --radiolist "Select with SPACE, confirm with ENTER" 20 74 12 \
+      "${args[@]}" 3>&1 1>&2 2>&3 | tr -d '"'
+  else
+    # non-interactive: echo the one tag marked 'on'
+    while [ $# -ge 3 ]; do [ "$3" = on ] && { printf '%s' "$1"; break; }; shift 3; done
+  fi
+}
+
 # tui_checklist "title" tag1 "desc1" on|off  tag2 "desc2" on|off ...
 # echoes space-separated selected tags.
 tui_checklist() {

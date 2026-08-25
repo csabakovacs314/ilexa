@@ -1,0 +1,31 @@
+{
+    "schema": 1,
+    "serial": 1,
+    "channel": "stable",
+    "releases": [
+        {
+            "version": "1.0.0",
+            "codename": "Duna",
+            "tag": "v1.0.0",
+            "released_at": "2026-08-25",
+            "commit": "336e233",
+            "severity": "feature",
+            "requires_installer": false,
+            "min_upgrade_from": "0.0.0",
+            "schema_version": {
+                "mysql": 1,
+                "iocs": 2,
+                "logins": 3
+            },
+            "app_tarball": {
+                "path": "assets/ilexa-app.tar.gz",
+                "sha256": "8a2f07f6eb7e4e3f0bcfb80eb0f28974057197a8b67d41db4764b79ad0c0fc4d",
+                "size": 1870793
+            },
+            "notes_hu": "Alap kiad\u00e1s: verzi\u00f3sz\u00e1m, friss\u00edt\u00e9s-ellen\u0151rz\u00e9s, adatb\u00e1zis-migr\u00e1ci\u00f3s keretrendszer.",
+            "notes_en": "Baseline release: version display, update checking, database migration framework."
+        }
+    ],
+    "latest": "1.0.0",
+    "generated_at": "2026-08-25T15:47:51Z"
+}

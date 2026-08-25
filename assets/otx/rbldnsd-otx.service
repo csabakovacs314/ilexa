@@ -4,6 +4,12 @@ After=network.target
 
 [Service]
 ExecStart=/sbin/rbldnsd -n -r /var/lib/rbldnsd -e -b 127.0.0.1/530 otx.rbl:ip4set:otx.rbl
+# rbldnsd re-reads its zone on SIGHUP. Required, not decorative:
+# otx-rbldnsd-sync.sh calls `systemctl reload rbldnsd-otx.service` after every
+# zone rewrite, and without ExecReload systemd fails that with "Job type reload
+# is not applicable" -- so a fresh install would refresh the OTX zone file and
+# never tell the running daemon about it.
+ExecReload=/bin/kill -HUP $MAINPID
 # rbldnsd has no sd_notify watchdog; a HUNG-but-alive daemon is caught by the
 # end-to-end probe /usr/bin/rbldnsd-liveness.sh instead.
 Restart=on-failure

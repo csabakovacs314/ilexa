@@ -177,3 +177,67 @@ h1, h2, h3, h4 { color: var(--ilexa-text); font-weight: 700; }
 /* The console frames this page and provides its own outer padding, so drop the
    body's top gap that assumes a standalone browser window. */
 .container { padding-top: 0; }
+
+/* ── Password recovery (standalone) ───────────────────────────────────── */
+/* Unlike the rest of PostfixAdmin, this page is reached DIRECTLY from
+   Roundcube's login screen (the "forgot password" button that
+   assets/roundcube-forgot-password-link/ adds), so it is seen on its own
+   rather than framed inside the console — and it has to stand on its own
+   visually.
+   password-recover.tpl sets an inline min-width:80% on the main container,
+   which stretches its single email field across the whole viewport and reads
+   as a broken layout instead of one short, focused task. Everything here is
+   scoped to the page's own body class, so no other PostfixAdmin screen moves. */
+/* Constrain the CONTENT, not the wrapper: password-recover.tpl puts the
+   <nav> header bar INSIDE this same container[role="main"], so narrowing the
+   container would shrink the logo bar into a floating 430px box instead of a
+   full-width header. Centring the heading and the form individually leaves
+   the navbar full-bleed, where it belongs. */
+.page-password-recover h2.h2,
+.page-password-recover .form {
+    max-width: 430px;
+    margin-left: auto;
+    margin-right: auto;
+}
+
+/* The instruction line ("follow the instructions to reset your password") is
+   the page's only prose and sits above a centred card — left-aligning it
+   against a narrow centred form looks accidental. */
+.page-password-recover h2.h2 {
+    /* Wider than the 430px form above: this is the page's only instruction,
+       and at this size it needs room to break into sensible lines instead of
+       being forced into a narrow ragged column. */
+    max-width: 540px;
+    text-align: center;
+    font-size: 1.75rem;
+    font-weight: 700;
+    line-height: 1.35;
+    letter-spacing: -.01em;
+    color: var(--ilexa-text);
+    margin-top: 44px;
+    margin-bottom: 26px;
+}
+
+/* Step down on small screens, where 1.75rem would eat most of the viewport. */
+@media (max-width: 540px) {
+    .page-password-recover h2.h2 {
+        font-size: 1.35rem;
+        margin-top: 32px;
+    }
+}
+
+.page-password-recover .form {
+    background: var(--ilexa-surface);
+    border: 1px solid var(--ilexa-border);
+    border-radius: var(--ilexa-radius);
+    box-shadow: var(--ilexa-shadow);
+    padding: 22px;
+}
+
+/* Sole action on the page: give it the full width of the card, matching the
+   submit button on the Roundcube login form users arrive from. */
+.page-password-recover .form .btn-primary {
+    display: block;
+    width: 100%;
+    margin-top: 6px;
+}

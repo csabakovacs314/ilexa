@@ -41,7 +41,7 @@ fi
 for f in update-abuse-c2.sh update-spamhaus-drop.sh; do
   install_bin "$MD_ASSETS/feeds/$f" "/usr/bin/$f" 0755
 done
-for f in update-firehol.sh update-abuseipdb.sh update-et.sh update-yara-forge.sh; do
+for f in update-firehol.sh update-abuseipdb.sh update-et.sh update-dshield.sh update-yara-forge.sh; do
   install_bin "$MD_ASSETS/feeds/$f" "/usr/local/sbin/$f" 0755
 done
 # Shared helper those three pipe every fetched list through, to drop private/
@@ -185,7 +185,7 @@ fi
 #                   meant the daily cron ran and synced nothing, forever. A
 #                   fresh install therefore had 0 rule files while the
 #                   reference host had 108 -- measured 2026-08-18.
-for s in spamhaus firehol et geoblock yara_forge rspamd_rules; do
+for s in spamhaus firehol et dshield geoblock yara_forge rspamd_rules; do
 
   if [ "$DRY_RUN" = 1 ]; then log_info "[dry-run] would enable keyless feed '$s'"; continue; fi
   /usr/local/sbin/qa-feeds-config.sh enable "$s" >/dev/null && log_info "feed '$s' enabled" \
@@ -213,6 +213,7 @@ MAILTO=""
 17 3 * * *   root qa-feeds-config.sh is-enabled firehol   && /usr/local/sbin/update-firehol.sh   >/dev/null 2>&1
 32 3 * * *   root qa-feeds-config.sh is-enabled abuseipdb && /usr/local/sbin/update-abuseipdb.sh >/dev/null 2>&1
 47 3 * * *   root qa-feeds-config.sh is-enabled et        && /usr/local/sbin/update-et.sh        >/dev/null 2>&1
+27 3 * * *   root qa-feeds-config.sh is-enabled dshield   && /usr/local/sbin/update-dshield.sh   >/dev/null 2>&1
 0 3 * * 1    root qa-feeds-config.sh is-enabled geoblock  && /usr/bin/update-geoip.sh       >/dev/null 2>&1
 25 4 * * *   root qa-feeds-config.sh is-enabled yara_forge && /usr/local/sbin/update-yara-forge.sh >/dev/null 2>&1
 EOF

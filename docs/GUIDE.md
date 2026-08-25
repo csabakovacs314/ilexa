@@ -231,7 +231,9 @@ ClamAV hits (`CLAM_VIRUS`) are rejected outright regardless of score.
 | `ILEXA_ADMIN_USER` | First console admin (Basic auth) | `admin` |
 | `ILEXA_ADMIN_PASSWORD` | Console admin password (blank ⇒ auto-generated) | auto |
 | `ILEXA_URL_PREFIX` | Apache `Alias` + cookie path | `/ilexa/` |
-| `ILEXA_LANG` | Console UI language (`en`/`hu`), seeded once; the console's Admin → language owns it afterwards | `en` |
+| `SYSTEM_LANG` | Default system language (`en`/`hu`) for **all three** web apps — Roundcube, ilexa and PostfixAdmin. Seeded once into ilexa's language file; the console's Admin → language owns it afterwards, and all three read that file at runtime so changing it there moves them together. Roundcube users can still override it in their own settings | `en` |
+| `ILEXA_LANG` | Deprecated alias for `SYSTEM_LANG`, still honoured in both directions so older answers files keep working | `$SYSTEM_LANG` |
+| `PASSWORD_EXPIRY_DAYS` | `30`\|`60`\|`90`\|`never`. Seeded into every domain this installer creates (`domain.password_expiry`); PostfixAdmin's own per-domain override in its web UI is untouched and stays superadmin-only. `never` sets PostfixAdmin's `password_expiration` off switch. Recovery email is required at mailbox creation regardless of this setting | `90` |
 | `QUARANTINE_FOLDERS` | Dovecot folders the console treats as quarantine | `Junk Quarantine Spam` |
 
 ### Mail archive (opt-in) — the deployment-type choice

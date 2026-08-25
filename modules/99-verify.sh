@@ -109,6 +109,7 @@ if [ "$DRY_RUN" != 1 ] && [ -e "$MD_CRED_FILE" ] \
   {
     echo ""
     echo "web addresses"
+    printf '%-32s %s\n' "  Landing page" "https://${MAIL_FQDN}/"
     [ "${ENABLE_ILEXA:-yes}" = yes ] \
       && printf '%-32s %s\n' "  ilexa console" "https://${MAIL_FQDN}${ILEXA_URL_PREFIX:-/ilexa/}"
     printf '%-32s %s\n' "  Roundcube webmail" "https://${MAIL_FQDN}/roundcube/"

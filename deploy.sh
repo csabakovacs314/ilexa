@@ -302,14 +302,32 @@ reading message bodies even for administrators; it defaults to DENY."
     ENABLE_ARCHIVE=yes
     ARCHIVE_RETENTION_DAYS=$(tui_input "Keep archived mail for how many days?" "30") || md_abort
   else ENABLE_ARCHIVE=no; fi
-  # Console UI language. English default; Yes is whiptail's default button,
-  # so plain Enter accepts English. Changeable any time from the console
-  # (Admin -> language), which owns the state file after the install.
-  if tui_yesno "ilexa console language: use ENGLISH as the interface language?
+  # Default system language -- Roundcube, ilexa AND PostfixAdmin all follow it.
+  # English default; Yes is whiptail's default button, so plain Enter accepts
+  # English. Changeable any time from the console (Admin -> language), which
+  # owns the state file afterwards; all three apps read that file at runtime,
+  # so changing it there moves them together.
+  if tui_yesno "Default system language: use ENGLISH as the interface language?
 
-(No = Hungarian / magyar. Changeable later in the console: Admin -> language.)"; then
-    ILEXA_LANG=en
-  else ILEXA_LANG=hu; fi
+Applies to webmail (Roundcube), the ilexa console and PostfixAdmin.
+
+(No = Hungarian / magyar. Changeable later in the console: Admin -> language.
+Individual users can still pick their own language in Roundcube's settings.)"; then
+    SYSTEM_LANG=en
+  else SYSTEM_LANG=hu; fi
+  ILEXA_LANG=$SYSTEM_LANG
+  # Password expiry: one global interval for every mailbox (PostfixAdmin's own
+  # per-domain override stays superadmin-only, unchanged, in its own UI).
+  # Radiolist default is 90 -- matches this installer's own recommended value
+  # elsewhere (see docs/GUIDE.md) and PostfixAdmin's own upstream
+  # documentation (DOCUMENTS/Password_Expiration.md) suggested example.
+  # "Never" maps to password_expiration=NO, PostfixAdmin's existing off
+  # switch -- not a new code path.
+  PASSWORD_EXPIRY_DAYS=$(tui_radiolist "Password expiry" \
+    30     "Expire passwords after 30 days"  off \
+    60     "Expire passwords after 60 days"  off \
+    90     "Expire passwords after 90 days"  on  \
+    never  "Never expire passwords"          off) || md_abort
   local extras extra_args=()
   extra_args=(last_login "Dovecot last-login tracking" on \
               fts_xapian "Full-text search (compiled; RAM-heavy)" on \
@@ -374,7 +392,21 @@ apply_defaults() {
   : "${ENABLE_ARCHIVE:=no}"
   : "${ARCHIVE_RETENTION_DAYS:=30}"
   : "${ILEXA_URL_PREFIX:=/ilexa/}"
-  : "${ILEXA_LANG:=en}"
+  # Default system language: one answer driving the interface language of
+  # ALL THREE web apps (Roundcube, ilexa, PostfixAdmin). ILEXA_LANG is the
+  # older name for the same thing and is still honoured, in both
+  # directions, so answers files written before this existed keep working.
+  : "${SYSTEM_LANG:=${ILEXA_LANG:-en}}"
+  : "${ILEXA_LANG:=$SYSTEM_LANG}"
+  # 30|60|90|never -- PostfixAdmin's own per-domain days column, seeded here
+  # for every domain this installer creates (seed_postfixadmin()), not a
+  # config.inc.php value: PostfixAdmin has no such global, only a per-domain
+  # DB column (domain.password_expiry) it expects an operator to set through
+  # its own UI. That column's schema default is 0 -- i.e. instant expiry --
+  # so leaving it unseeded here would reproduce, on every fresh install, the
+  # exact all-mailboxes-already-expired state found and fixed by hand on the
+  # reference host 2026-08-23.
+  : "${PASSWORD_EXPIRY_DAYS:=90}"
   : "${ILEXA_ADMIN_USER:=admin}"
   : "${ILEXA_ADMIN_PASSWORD:=}"        # blank = generated and recorded
   : "${QUARANTINE_FOLDERS:=Junk Quarantine Spam}"
@@ -541,7 +573,8 @@ export_config() {
     RSPAMD_CTRL RSPAMD_MILTER CLAMD_SOCKET MTA_GROUP \
     ENABLE_ILEXA ILEXA_LIST_DIR ENABLE_HU_CLASSIFY HU_CLASSIFY_REPORT_EMAIL ENABLE_UNOFFICIAL_SIGS \
     ENABLE_FEEDS ABUSECH_API_KEY ABUSEIPDB_API_KEY ENABLE_OTX_URI \
-    ENABLE_BREACH_CHECK ILEXA_URL_PREFIX ILEXA_ADMIN_USER ILEXA_ADMIN_PASSWORD ILEXA_LANG \
+    ENABLE_BREACH_CHECK ILEXA_URL_PREFIX ILEXA_ADMIN_USER ILEXA_ADMIN_PASSWORD ILEXA_LANG SYSTEM_LANG \
+    PASSWORD_EXPIRY_DAYS \
     QUARANTINE_FOLDERS ARCHIVE_USER TIMEZONE SITE_TITLE PHP_FPM_SOCK MYSQL_SOCK \
     WEB_USER WEB_GROUP ENABLE_ARCHIVE ARCHIVE_RETENTION_DAYS ENABLE_SIEM_EXPORT ENABLE_REPORT_ADDRESSES
 }
@@ -558,7 +591,9 @@ TLS mode:        $TLS_MODE
 Spam tag/reject:  ${SPAM_ADD_HEADER:-4} / ${SPAM_REJECT:-15}
 Mail archive:    ${ENABLE_ARCHIVE:-no}${ENABLE_ARCHIVE:+ (${ARCHIVE_RETENTION_DAYS:-30} days)}
 Feeds:           ${ENABLE_FEEDS:-no}
-ilexa console:   ${ENABLE_ILEXA:-yes} at ${ILEXA_URL_PREFIX:-/ilexa/} (language: ${ILEXA_LANG:-en})
+ilexa console:   ${ENABLE_ILEXA:-yes} at ${ILEXA_URL_PREFIX:-/ilexa/}
+System language: ${SYSTEM_LANG:-en} (Roundcube + ilexa + PostfixAdmin)
+Password expiry: $([ "${PASSWORD_EXPIRY_DAYS:-90}" = never ] && echo "never (disabled)" || echo "${PASSWORD_EXPIRY_DAYS:-90} days")
 Geoblock:        $GEOBLOCK_COUNTRIES
 OTX suite:       $ENABLE_OTX
 Spamhaus DQS:    $([ -n "${SPAMHAUS_DQS_KEY:-}" ] && echo yes || echo no)

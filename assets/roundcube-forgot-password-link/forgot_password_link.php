@@ -25,6 +25,14 @@ class forgot_password_link extends rcube_plugin
         $this->load_config();
         $this->add_texts('localization/', true);
         $this->add_hook('template_container', [$this, 'container']);
+
+        // Styles the link as a button and lifts it above the footer's product
+        // name, so it lands directly under the submit button. Login page only
+        // -- this is the only task that renders the container below, and the
+        // rules deliberately reach #login-footer, which exists nowhere else.
+        if (rcmail::get_instance()->task === 'login') {
+            $this->include_stylesheet('forgot_password_link.css');
+        }
     }
 
     function container($args)

@@ -46,3 +46,14 @@ Alias /postfixadmin /var/www/html/postfixadmin/public
     Require all denied
 </DirectoryMatch>
 
+# --- Landing page: force index.php ahead of index.html at the docroot -----
+# EL's httpd (via php.conf) already prefers index.php, but Debian/Ubuntu's
+# apache2 ships dir.conf with index.html first -- landing.php (dynamic:
+# reads the install-time language and a per-visitor lang cookie) would
+# silently lose to any stray static index.html there. Declared explicitly
+# so behaviour does not depend on which distribution's packaged default
+# happens to win.
+<Directory "/var/www/html">
+    DirectoryIndex index.php index.html
+</Directory>
+
