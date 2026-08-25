@@ -1,8 +1,30 @@
 {
     "schema": 1,
-    "serial": 7,
+    "serial": 8,
     "channel": "stable",
     "releases": [
+        {
+            "version": "1.0.7",
+            "codename": "Duna",
+            "tag": "v1.0.7",
+            "released_at": "2026-08-25",
+            "commit": "7aa835d",
+            "severity": "fix",
+            "requires_installer": false,
+            "min_upgrade_from": "0.0.0",
+            "schema_version": {
+                "mysql": 1,
+                "iocs": 2,
+                "logins": 3
+            },
+            "app_tarball": {
+                "path": "assets/ilexa-app.tar.gz",
+                "sha256": "dce1084441938b561df1854a1bf46108cbb4849286ef9cd6fac3b9fc719c0cca",
+                "size": 1883223
+            },
+            "notes_hu": "Megbizhatobb frissites: sqlite mentes varakozik a zarolasra, es a verziojelzo frissites utan azonnal helyes.",
+            "notes_en": "More reliable updates: the sqlite snapshot waits out concurrent writes, and the version tile is correct immediately after an update."
+        },
         {
             "version": "1.0.6",
             "codename": "Duna",
@@ -158,6 +180,6 @@
             "notes_en": "Baseline release: version display, update checking, database migration framework."
         }
     ],
-    "latest": "1.0.6",
-    "generated_at": "2026-08-25T19:42:27Z"
+    "latest": "1.0.7",
+    "generated_at": "2026-08-25T20:46:55Z"
 }
