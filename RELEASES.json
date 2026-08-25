@@ -1,8 +1,30 @@
 {
     "schema": 1,
-    "serial": 6,
+    "serial": 7,
     "channel": "stable",
     "releases": [
+        {
+            "version": "1.0.6",
+            "codename": "Duna",
+            "tag": "v1.0.6",
+            "released_at": "2026-08-25",
+            "commit": "21eee67",
+            "severity": "fix",
+            "requires_installer": false,
+            "min_upgrade_from": "0.0.0",
+            "schema_version": {
+                "mysql": 1,
+                "iocs": 2,
+                "logins": 3
+            },
+            "app_tarball": {
+                "path": "assets/ilexa-app.tar.gz",
+                "sha256": "5364e8157b651fdde6e00bc354a4cdb332fecc886b40edf59513ea4b0d332f62",
+                "size": 1882332
+            },
+            "notes_hu": "Atmeneti halozati/CDN hibak automatikus ujraprobalasa frissiteskor.",
+            "notes_en": "Automatically retry transient CDN failures when fetching and verifying the release manifest."
+        },
         {
             "version": "1.0.5",
             "codename": "Duna",
@@ -136,6 +158,6 @@
             "notes_en": "Baseline release: version display, update checking, database migration framework."
         }
     ],
-    "latest": "1.0.5",
-    "generated_at": "2026-08-25T18:10:30Z"
+    "latest": "1.0.6",
+    "generated_at": "2026-08-25T19:42:27Z"
 }
