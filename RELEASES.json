@@ -1,8 +1,30 @@
 {
     "schema": 1,
-    "serial": 3,
+    "serial": 4,
     "channel": "stable",
     "releases": [
+        {
+            "version": "1.0.3",
+            "codename": "Duna",
+            "tag": "v1.0.3",
+            "released_at": "2026-08-25",
+            "commit": "8784c11",
+            "severity": "fix",
+            "requires_installer": false,
+            "min_upgrade_from": "0.0.0",
+            "schema_version": {
+                "mysql": 1,
+                "iocs": 2,
+                "logins": 3
+            },
+            "app_tarball": {
+                "path": "assets/ilexa-app.tar.gz",
+                "sha256": "ca3b79205c4c082efa951ec4a862cc5ff019b256a96d259e351c9cbbe7963c17",
+                "size": 1879581
+            },
+            "notes_hu": "Frissites-alkalmazasi audit-naplo duplikacio javitasa.",
+            "notes_en": "Fix audit-log duplication when applying an update (update-run.json ownership)."
+        },
         {
             "version": "1.0.2",
             "codename": "Duna",
@@ -22,7 +44,7 @@
                 "sha256": "23817134e112e289915086ed201235389cdaf11ec03dcd9450f4eb2eb54d0b8b",
                 "size": 1879234
             },
-            "notes_hu": "Jav\u00edt\u00e1s: a friss\u00edt\u0151 folyamat maga h\u00e1rommal tal\u00e1lt hib\u00e1t elh\u00e1r\u00edtottunk az els\u0151 pr\u00f3ba ut\u00e1n.",
+            "notes_hu": "Javítás: a frissítő folyamat maga hárommal talált hibát elhárítottunk az első próba után.",
             "notes_en": "Fix: three bugs found in the update-apply pipeline's own first rehearsal, resolved."
         },
         {
@@ -44,7 +66,7 @@
                 "sha256": "0b3dfa5a5182ff604d7c516f1e3e225084616fec041da5d2ee8e43ec96dc2063",
                 "size": 1878953
             },
-            "notes_hu": "Jav\u00edt\u00e1s: a check-views.php lint eszk\u00f6z mostant\u00f3l elkapja a bootstrap.php saj\u00e1t hib\u00e1it is.",
+            "notes_hu": "Javítás: a check-views.php lint eszköz mostantól elkapja a bootstrap.php saját hibáit is.",
             "notes_en": "Fix: check-views.php now catches diagnostics from bootstrap.php's own top-level code too."
         },
         {
@@ -66,10 +88,10 @@
                 "sha256": "8a2f07f6eb7e4e3f0bcfb80eb0f28974057197a8b67d41db4764b79ad0c0fc4d",
                 "size": 1870793
             },
-            "notes_hu": "Alap kiad\u00e1s: verzi\u00f3sz\u00e1m, friss\u00edt\u00e9s-ellen\u0151rz\u00e9s, adatb\u00e1zis-migr\u00e1ci\u00f3s keretrendszer.",
+            "notes_hu": "Alap kiadás: verziószám, frissítés-ellenőrzés, adatbázis-migrációs keretrendszer.",
             "notes_en": "Baseline release: version display, update checking, database migration framework."
         }
     ],
-    "latest": "1.0.2",
-    "generated_at": "2026-08-25T16:56:19Z"
+    "latest": "1.0.3",
+    "generated_at": "2026-08-25T17:03:56Z"
 }
