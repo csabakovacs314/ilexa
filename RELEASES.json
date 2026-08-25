@@ -1,8 +1,30 @@
 {
     "schema": 1,
-    "serial": 1,
+    "serial": 2,
     "channel": "stable",
     "releases": [
+        {
+            "version": "1.0.1",
+            "codename": "Duna",
+            "tag": "v1.0.1",
+            "released_at": "2026-08-25",
+            "commit": "47895ec",
+            "severity": "fix",
+            "requires_installer": false,
+            "min_upgrade_from": "0.0.0",
+            "schema_version": {
+                "mysql": 1,
+                "iocs": 2,
+                "logins": 3
+            },
+            "app_tarball": {
+                "path": "assets/ilexa-app.tar.gz",
+                "sha256": "0b3dfa5a5182ff604d7c516f1e3e225084616fec041da5d2ee8e43ec96dc2063",
+                "size": 1878953
+            },
+            "notes_hu": "Jav\u00edt\u00e1s: a check-views.php lint eszk\u00f6z mostant\u00f3l elkapja a bootstrap.php saj\u00e1t hib\u00e1it is.",
+            "notes_en": "Fix: check-views.php now catches diagnostics from bootstrap.php's own top-level code too."
+        },
         {
             "version": "1.0.0",
             "codename": "Duna",
@@ -26,6 +48,6 @@
             "notes_en": "Baseline release: version display, update checking, database migration framework."
         }
     ],
-    "latest": "1.0.0",
-    "generated_at": "2026-08-25T15:47:51Z"
+    "latest": "1.0.1",
+    "generated_at": "2026-08-25T16:40:49Z"
 }

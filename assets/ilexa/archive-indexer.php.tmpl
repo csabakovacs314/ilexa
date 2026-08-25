@@ -61,48 +61,69 @@ $ins = $pdo->prepare(
 
 $now = time();
 $count = 0;
+$skipped = 0;
 // Records are separated by a form-feed line (\n\f\n).
 foreach (preg_split('/\n?\f\n?/', $out) as $rec) {
     $rec = ltrim($rec, "\n");
     if ($rec === '' || !preg_match('/^uid:\s*(\d+)/m', $rec, $mu)) continue;
     $uid = (int) $mu[1];
 
-    $ts = $now;
-    if (preg_match('/^date\.saved:\s*(.+)$/m', $rec, $md)) {
-        $t = strtotime(trim($md[1]));
-        if ($t) $ts = $t;
+    // One message's headers are hostile input by this project's own rule
+    // (security.md: "Treat ... email headers ... as hostile input") and any
+    // single one of them throwing must never take down the whole batch --
+    // found live 2026-08-25: an uncaught PDOException on ONE malformed
+    // message wedged every 3-minute cron run for over an hour, silently
+    // blocking every message behind it too, since $last is only ever
+    // MAX(uid) of what is already in the table and nothing here ever
+    // recorded "seen but unindexable". sanitize_utf8() (below) fixes the
+    // specific cause found; this try/catch is the general fix for
+    // whatever the next one turns out to be.
+    try {
+        $ts = $now;
+        if (preg_match('/^date\.saved:\s*(.+)$/m', $rec, $md)) {
+            $t = strtotime(trim($md[1]));
+            if ($t) $ts = $t;
+        }
+
+        // Header block follows "hdr:\n"; unfold continuation lines (leading space/tab).
+        $hdrs = '';
+        if (($p = strpos($rec, "\nhdr:")) !== false) {
+            $hdrs = ltrim(substr($rec, $p + 5), "\n");
+        }
+        $unf = preg_replace('/\n[ \t]+/', ' ', $hdrs);
+
+        $from = mb_substr(decode_hdr(hdr($unf, 'From')), 0, 320, 'UTF-8');
+        $to   = mb_substr(decode_hdr(recipient($unf, $hdrs)), 0, 320, 'UTF-8');
+        $subj = mb_substr(decode_hdr(hdr($unf, 'Subject')), 0, 512, 'UTF-8');
+        [$score, $spam] = verdict($unf);
+
+        // Deliberately from $hdrs (RAW), never $unf. Postfix's cleanup folds a
+        // message's first DATA line onto the topmost Received: header whenever
+        // that line starts with a space or TAB -- so an unfolded block can carry
+        // an attacker-authored bracketed literal after Postfix's own client-IP
+        // group, and "last bracket wins" would return it. See
+        // qa_topmost_received_client_ip() in the console's src/ioc.php for the
+        // full account; this is the same rule, and it must stay the same rule.
+        $sip = topmost_received_ip($hdrs);
+        $scc = $sip !== '' ? geoip_cc($sip) : '';
+
+        $ins->execute([
+            ':uid' => $uid, ':ts' => $ts, ':frm' => $from, ':to' => $to, ':subj' => $subj,
+            ':score' => $score, ':spam' => $spam, ':iat' => $now,
+            ':sip' => ($sip !== '' ? $sip : null), ':scc' => ($scc !== '' ? $scc : null),
+        ]);
+        $count++;
+    } catch (Throwable $e) {
+        // Logged, not silently dropped: fwrite(STDERR) reaches cron-alert.sh's
+        // captured output, so this shows up in `logger -t archive-index`'s
+        // one-line journal summary (it greps for "error"/"fail") without
+        // failing the whole run's exit code -- exactly the distinction this
+        // fix exists to make: one bad message is a warning, not an outage.
+        fwrite(STDERR, "archive-indexer: skipped uid=$uid: " . $e->getMessage() . "\n");
+        $skipped++;
     }
-
-    // Header block follows "hdr:\n"; unfold continuation lines (leading space/tab).
-    $hdrs = '';
-    if (($p = strpos($rec, "\nhdr:")) !== false) {
-        $hdrs = ltrim(substr($rec, $p + 5), "\n");
-    }
-    $unf = preg_replace('/\n[ \t]+/', ' ', $hdrs);
-
-    $from = mb_substr(decode_hdr(hdr($unf, 'From')), 0, 320, 'UTF-8');
-    $to   = mb_substr(decode_hdr(recipient($unf, $hdrs)), 0, 320, 'UTF-8');
-    $subj = mb_substr(decode_hdr(hdr($unf, 'Subject')), 0, 512, 'UTF-8');
-    [$score, $spam] = verdict($unf);
-
-    // Deliberately from $hdrs (RAW), never $unf. Postfix's cleanup folds a
-    // message's first DATA line onto the topmost Received: header whenever
-    // that line starts with a space or TAB -- so an unfolded block can carry
-    // an attacker-authored bracketed literal after Postfix's own client-IP
-    // group, and "last bracket wins" would return it. See
-    // qa_topmost_received_client_ip() in the console's src/ioc.php for the
-    // full account; this is the same rule, and it must stay the same rule.
-    $sip = topmost_received_ip($hdrs);
-    $scc = $sip !== '' ? geoip_cc($sip) : '';
-
-    $ins->execute([
-        ':uid' => $uid, ':ts' => $ts, ':frm' => $from, ':to' => $to, ':subj' => $subj,
-        ':score' => $score, ':spam' => $spam, ':iat' => $now,
-        ':sip' => ($sip !== '' ? $sip : null), ':scc' => ($scc !== '' ? $scc : null),
-    ]);
-    $count++;
 }
-echo "archive-indexer: indexed $count new message(s) (prev max uid=$last)\n";
+echo "archive-indexer: indexed $count new message(s), skipped $skipped (prev max uid=$last)\n";
 
 // ── helpers ──────────────────────────────────────────────────────
 
@@ -214,9 +235,38 @@ function decode_hdr(string $s): string {
     if ($s === '') return '';
     if (strpos($s, '=?') !== false) {
         $d = @iconv_mime_decode($s, ICONV_MIME_DECODE_CONTINUE_ON_ERROR, 'UTF-8');
-        if ($d !== false && $d !== '') return $d;
+        if ($d !== false && $d !== '') return sanitize_utf8($d);
     }
-    return $s;
+    return sanitize_utf8($s);
+}
+
+// Guarantee valid UTF-8 out of every header value, no matter how a sender
+// mangled it -- found live 2026-08-25: a To: header with no To: address at
+// all, just a raw 8-bit company name and no MIME encoding declared at all
+// (not even a bogus one), wedged this indexer's every-3-minute cron run for
+// over an hour: an uncaught PDOException ("Incorrect string value") on the
+// INSERT, because archive_index is utf8mb4 and the raw bytes were not valid
+// UTF-8. decode_hdr()'s MIME-decode branch only fires for standards-compliant
+// `=?charset?...?=` senders; this is the case where a sender does not even
+// try.
+//
+// Try CP1250 first, not a blind ASCII-strip: Hungarian mail on a Hungarian
+// platform overwhelmingly means a legacy Central-European byte sequence when
+// it is not UTF-8, and CP1250 is what recovers correctly, including
+// characters (Ő/Ű) Latin-1 cannot represent. Confirmed against the actual
+// live message: "\xC9P\xCDT\xC9SZM\xDBHELY Kft." -> CP1250 -> "ÉPÍTÉSZMŰHELY
+// Kft." -- both the accented letters AND Ű come back correct, which a Latin-1
+// guess would not manage (Latin-1 has no Ű). If that guess is ALSO not valid
+// UTF-8 (truly arbitrary garbage, not text in any single common encoding),
+// //IGNORE strips whatever bytes cannot be represented -- guaranteeing a
+// valid, insertable string is the point; losing a few unrecoverable
+// characters is an acceptable cost against wedging the indexer again.
+function sanitize_utf8(string $s): string {
+    if ($s === '' || mb_check_encoding($s, 'UTF-8')) return $s;
+    $cp1250 = @iconv('Windows-1250', 'UTF-8//IGNORE', $s);
+    if ($cp1250 !== false && $cp1250 !== '' && mb_check_encoding($cp1250, 'UTF-8')) return $cp1250;
+    $stripped = @iconv('UTF-8', 'UTF-8//IGNORE', $s);
+    return $stripped !== false ? $stripped : '';
 }
 // Prefer rspamd verdict; fall back to MailScanner during the transition.
 function verdict(string $unf): array {

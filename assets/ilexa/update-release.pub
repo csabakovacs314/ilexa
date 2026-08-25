@@ -1,0 +1,25 @@
+# Pinned Ed25519 public key(s) used to verify RELEASES.json.sig before an
+# update check or apply trusts anything in it.
+#
+# Two keys on purpose: PRIMARY is used to sign every real release; SPARE is
+# an offline cold-stored key generated at the same time, never used to sign
+# anything unless PRIMARY is lost. Verification accepts a signature from
+# EITHER key -- so losing one copy of the private key does not brick updates
+# for every already-installed host. Both live only as PEM public keys here;
+# the private keys never appear in any git repo.
+#
+# Rotation: append the new key as a new PRIMARY/SPARE block below, keep the
+# old PRIMARY block (renamed to a dated comment) until every host still
+# running the old key has picked up a normally-signed update carrying the
+# new pin -- removing an old key before that stops those hosts trusting
+# anything.
+
+# PRIMARY
+-----BEGIN PUBLIC KEY-----
+MCowBQYDK2VwAyEAotbBY8SYxJ6lQ8k6ndbARfg/VY1gH734adLh62PEpkc=
+-----END PUBLIC KEY-----
+
+# SPARE (offline cold storage)
+-----BEGIN PUBLIC KEY-----
+MCowBQYDK2VwAyEAkCLBLuzTfnRpGhqCOJMHkpRCFdiGRBD7U7rke5qwzOw=
+-----END PUBLIC KEY-----

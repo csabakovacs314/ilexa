@@ -1,0 +1,31 @@
+# Curated, ordered, append-only list of release codenames -- Hungarian rivers.
+#
+# Consumed strictly top-down by tools/release.sh, one name per MAJOR.MINOR
+# line (patches inherit their minor's codename). The list is the pick-order
+# aid for the human cutting a release; RELEASES.json and the shipped
+# CODENAME file are the canonical record once a name is used -- nothing
+# ever recomputes a codename from this file at read time.
+#
+# APPEND ONLY. Never reorder or remove a line once any release has used it --
+# tools/release.sh tracks "next" by position, and reordering would silently
+# reassign a name already shipped in a past release's RELEASES.json entry.
+Duna
+Tisza
+Dráva
+Rába
+Maros
+Körös
+Zagyva
+Ipoly
+Sajó
+Hernád
+Zala
+Sió
+Bodrog
+Kapos
+Szamos
+Túr
+Ér
+Marcal
+Berettyó
+Hármas-Körös
