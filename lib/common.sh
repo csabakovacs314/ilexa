@@ -388,7 +388,25 @@ pkg_try() { # pkg...  -> 0/1, never aborts
     # aborted 05-base and the whole install. Observed on a fresh Ubuntu 24.04
     # host 2026-08-17, three seconds into the very first install. Any user
     # installing onto a new VM hits this, so waiting is the correct default.
-    apt) apt-get -y -o DPkg::Lock::Timeout="${APT_LOCK_WAIT:-600}" install "$@" && return 0 ;;
+    # DEBIAN_FRONTEND=noninteractive is not optional here. Several packages in
+    # this stack ask debconf questions mid-install, and postfix asks the worst
+    # one: a full-screen "General mail configuration type" menu that BLOCKS the
+    # run until someone presses OK. An operator watching a wall of package
+    # output has no reason to expect a dialog and no indication that the
+    # install is now waiting on them -- it simply looks hung. Reported by the
+    # operator on 2026-08-26: "postfix config, not evident that we have to
+    # select OK".
+    #
+    # It is also the wrong question to answer: postfix's own debconf would
+    # write a main.cf that 20-postfix.sh then overwrites wholesale. The
+    # preseed below picks "No configuration" so the package installs inert and
+    # this installer remains the single author of postfix's configuration.
+    apt)
+      export DEBIAN_FRONTEND=noninteractive
+      if command -v debconf-set-selections >/dev/null 2>&1; then
+        printf 'postfix postfix/main_mailer_type select No configuration\n' | debconf-set-selections 2>/dev/null || true
+      fi
+      apt-get -y -o DPkg::Lock::Timeout="${APT_LOCK_WAIT:-600}" install "$@" && return 0 ;;
     *)   die "pkg_try: unknown or unset PKG_MGR '$PKG_MGR' -- os_detect must run before any pkg_install/pkg_try call" ;;
   esac
   log_warn "$PKG_MGR install failed: $*"; return 1
