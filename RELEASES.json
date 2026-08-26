@@ -1,8 +1,30 @@
 {
     "schema": 1,
-    "serial": 11,
+    "serial": 12,
     "channel": "stable",
     "releases": [
+        {
+            "version": "1.0.11",
+            "codename": "Duna",
+            "tag": "v1.0.11",
+            "released_at": "2026-08-26",
+            "commit": "327f72a",
+            "severity": "feature",
+            "requires_installer": false,
+            "min_upgrade_from": "0.0.0",
+            "schema_version": {
+                "mysql": 1,
+                "iocs": 2,
+                "logins": 3
+            },
+            "app_tarball": {
+                "path": "assets/ilexa-app.tar.gz",
+                "sha256": "d49f9388f98721c57839b1b05cbd3545768c2995b9dfc0e4a425148b7e801fc2",
+                "size": 1886062
+            },
+            "notes_hu": "A Blokkolt levelek es az Adatvedelmi incidensek kartya alapertelmezetten osszecsukva jelenik meg.",
+            "notes_en": "The Blocked mail and Data-breach cards are now collapsed by default."
+        },
         {
             "version": "1.0.10",
             "codename": "Duna",
@@ -246,6 +268,6 @@
             "notes_en": "Baseline release: version display, update checking, database migration framework."
         }
     ],
-    "latest": "1.0.10",
-    "generated_at": "2026-08-26T09:03:39Z"
+    "latest": "1.0.11",
+    "generated_at": "2026-08-26T11:32:27Z"
 }
