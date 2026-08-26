@@ -1,8 +1,30 @@
 {
     "schema": 1,
-    "serial": 12,
+    "serial": 13,
     "channel": "stable",
     "releases": [
+        {
+            "version": "1.0.12",
+            "codename": "Duna",
+            "tag": "v1.0.12",
+            "released_at": "2026-08-26",
+            "commit": "da78c5c",
+            "severity": "fix",
+            "requires_installer": false,
+            "min_upgrade_from": "0.0.0",
+            "schema_version": {
+                "mysql": 1,
+                "iocs": 2,
+                "logins": 3
+            },
+            "app_tarball": {
+                "path": "assets/ilexa-app.tar.gz",
+                "sha256": "fd88544dfb52561d4c0aa2820d7ecb5229cf75072bc22c63e4bed824678dcd48",
+                "size": 1886460
+            },
+            "notes_hu": "A Blokkolt levelek kartya vegre szamolja a virus-elutasitasokat is.",
+            "notes_en": "The Blocked mail card now counts virus rejections again."
+        },
         {
             "version": "1.0.11",
             "codename": "Duna",
@@ -268,6 +290,6 @@
             "notes_en": "Baseline release: version display, update checking, database migration framework."
         }
     ],
-    "latest": "1.0.11",
-    "generated_at": "2026-08-26T11:32:27Z"
+    "latest": "1.0.12",
+    "generated_at": "2026-08-26T15:11:52Z"
 }
