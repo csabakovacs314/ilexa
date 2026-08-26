@@ -18,8 +18,15 @@ ANS="${1:-$ROOT/ci/answers.ci.conf}"
 echo "using answers: $ANS"
 
 # OS-specific service and package names, resolved rather than assumed.
-if [ -d /etc/apache2 ]; then WEB_SVC=apache2; PKG_INSTALL="apt-get install -y -qq"
-else                        WEB_SVC=httpd;   PKG_INSTALL="dnf -y install"; fi
+#
+# Keyed on the PACKAGE MANAGER, not on /etc/apache2. This block runs before
+# phase 1 has installed anything, so on a genuinely fresh host that directory
+# does not exist yet and the test fell through to the EL name -- then phase 2
+# reported "FAIL: service httpd active" on a box where apache2 was running
+# perfectly. It only ever passed on a re-run, where a previous install had
+# already created the directory. Observed on a clean 24.04 box 2026-08-26.
+if command -v apt-get >/dev/null 2>&1; then WEB_SVC=apache2; PKG_INSTALL="apt-get install -y -qq"
+else                                        WEB_SVC=httpd;   PKG_INSTALL="dnf -y install"; fi
 CLAMD_SVC=$(systemctl list-unit-files 'clamav-daemon.service' 'clamd@scan.service' --no-legend 2>/dev/null \
             | awk '{print $1}' | head -1)
 fail=0
@@ -64,8 +71,14 @@ if [ -r "$PA_CLI" ] && [ -n "$CI_DOMAIN" ]; then
   # The domain usually already exists (the installer creates it); only its
   # absence is worth reporting, not "already exists".
   php "$PA_CLI" domain add "$CI_DOMAIN" --active 1 >/dev/null 2>&1
+  # --email_other is REQUIRED, not optional padding: the installer patches
+  # MailboxHandler::preSave() to refuse a NEW mailbox without a recovery
+  # address, because one that has none cannot use password-recover.php and is
+  # a permanent-lockout risk under expiry enforcement. This check predated that
+  # patch and was asserting against behaviour the product deliberately changed,
+  # failing with "Error: Field Other e-mail is missing".
   add_out=$(php "$PA_CLI" mailbox add "$CI_USER" --password 'Test-1234' --password2 'Test-1234' \
-                 --name CI --active 1 2>&1)
+                 --name CI --active 1 --email_other "postmaster@$CI_DOMAIN" 2>&1)
   md=$(mysql -N -e "SELECT maildir FROM postfix.mailbox WHERE username='$CI_USER';" 2>/dev/null)
   if [ -z "$md" ]; then
     bad "could not provision $CI_USER -- postfixadmin-cli said: $(printf '%s' "$add_out" | grep -iE 'error|invalid|exists' | head -1)"
