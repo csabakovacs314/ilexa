@@ -21,7 +21,12 @@
 # /etc/dovecot, web-server config and databases with templated defaults.
 set -euo pipefail
 
-SRC_DIR="${ILEXA_SRC_DIR:-/opt/ilexa-src}"
+# NOT /opt/ilexa-src -- modules/55-ilexa.sh hardcodes SRC=/opt/ilexa-src as the
+# location it unpacks the ILEXA APP bundle into. Cloning the installer there
+# merges the two trees, overwrites the installer's own deploy.sh with the app's
+# one of the same name, and chowns the whole checkout to the web user (which
+# then breaks git with "dubious ownership"). Observed for real on 2026-08-26.
+SRC_DIR="${ILEXA_SRC_DIR:-/opt/ilexa-installer}"
 REPO="${ILEXA_REPO:-https://github.com/csabakovacs314/ilexa}"
 REF="main"
 ANSWERS_OUT="${ILEXA_ANSWERS:-/root/answers.conf}"
@@ -75,6 +80,13 @@ while [ $# -gt 0 ]; do
 done
 
 [ "$(id -u)" -eq 0 ] || die "must run as root"
+
+case "$SRC_DIR" in
+    /opt/ilexa-src|/opt/ilexa-src/)
+        die "ILEXA_SRC_DIR must not be /opt/ilexa-src -- that path belongs to the
+       ilexa APP bundle (modules/55-ilexa.sh unpacks it there) and the two
+       trees would overwrite each other. Use /opt/ilexa-installer." ;;
+esac
 
 # Refuse to run while a deploy is already in flight. This script re-checks out
 # $SRC_DIR, which is the very directory a running deploy.sh executes from --
@@ -161,6 +173,11 @@ fi
 say "git $(git --version | awk '{print $3}')"
 
 step "Fetching ilexa ($REF)"
+# Modules chown parts of the filesystem to the web user; if that ever touches
+# this checkout, git refuses to operate on it ("dubious ownership"). Declaring
+# it safe up front keeps a re-run working instead of failing cryptically.
+git config --global --get-all safe.directory 2>/dev/null | grep -qx "$SRC_DIR" \
+    || git config --global --add safe.directory "$SRC_DIR"
 if [ -d "$SRC_DIR/.git" ]; then
     git -C "$SRC_DIR" remote set-url origin "$REPO"
     git -C "$SRC_DIR" fetch -q --depth 1 origin "$REF"
