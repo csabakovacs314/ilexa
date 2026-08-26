@@ -39,6 +39,7 @@ geoblock|/usr/bin/update-geoip.sh
 firehol|/usr/local/sbin/update-firehol.sh
 abuseipdb|/usr/local/sbin/update-abuseipdb.sh
 et|/usr/local/sbin/update-et.sh
+dshield|/usr/local/sbin/update-dshield.sh
 rspamd_rules|/usr/local/sbin/update-rspamd-community-rules.sh
 yara_forge|/usr/local/sbin/update-yara-forge.sh
 "
