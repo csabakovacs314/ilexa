@@ -649,5 +649,81 @@ SOFT_FAIL_RC=1
 */5 * * * * ${WEB_USER} /usr/bin/cron-alert.sh qa-signin-monitor /usr/local/sbin/qa-signin-monitor.php
 EOF
 
+# ---- self-update provisioning ----------------------------------------------
+# NONE of this was installed before 2026-08-26, so the one-click self-update
+# feature had never worked on any host except the reference machine, where it
+# was assembled by hand while being built. A fresh install shipped the helper
+# scripts and the sudoers grant, then failed at the first step:
+# qa-update-check.sh returned ERR_NO_PUBKEY and the console's version tile read
+# "check failed" forever. Found on a clean 24.04 box while preparing a rollback
+# drill -- the drill could not even start.
+if [ "$DRY_RUN" != 1 ]; then
+  # 1. Pinned release-signing keys. Verification is fail-closed, so an absent
+  #    key does not degrade to "unsigned but working" -- it stops everything.
+  install -d -m 755 /etc/ilexa
+  if [ -r "$MD_ROOT/assets/ilexa/update-release.pub" ]; then
+    install -m 644 "$MD_ROOT/assets/ilexa/update-release.pub" /etc/ilexa/update-release.pub
+    log_info "release-signing public key(s) installed"
+  else
+    log_warn "assets/ilexa/update-release.pub missing — one-click updates will not work on this host"
+  fi
+
+  # 2. State tree. staging/ and rollback/ are created by the apply script, but
+  #    installed.json must exist before the first run so the console has a
+  #    version record to show, and last-tmpl/ must exist for the
+  #    ERR_TMPL_CHANGED comparison to have a baseline.
+  install -d -m 755 /var/lib/ilexa/update /var/lib/ilexa/update/staging \
+                    /var/lib/ilexa/update/rollback /var/lib/ilexa/update/last-tmpl
+  for f in "$SRC"/install/*.tmpl; do
+    [ -e "$f" ] && install -m 644 "$f" "/var/lib/ilexa/update/last-tmpl/$(basename "$f")"
+  done
+  if [ ! -f /var/lib/ilexa/update/installed.json ]; then
+    write_file /var/lib/ilexa/update/installed.json 0644 root:root <<JSON
+{
+    "version": "$(tr -d '[:space:]' < "$SRC/VERSION" 2>/dev/null || echo unknown)",
+    "codename": "$(tr -d '[:space:]' < "$SRC/CODENAME" 2>/dev/null || echo '')",
+    "commit": "installer",
+    "applied_at": $(date +%s),
+    "applied_by": "installer",
+    "method": "installer",
+    "previous_version": "",
+    "source_url": "",
+    "sha256": "",
+    "manifest_serial": 0
+}
+JSON
+  fi
+
+  # 3. Migration credential. DDL-capable but scoped to the two console-owned
+  #    tables; deliberately NOT readable by the web user -- only the root-run
+  #    apply script and qa-db-migrate.php ever use it.
+  MIG_PASS="${ILEXA_MIG_PASS:-$(gen_pw 24)}"
+  save_secret ILEXA_MIG_PASS "$MIG_PASS"
+  db_exec "CREATE USER IF NOT EXISTS 'ilexa_mig'@'localhost' IDENTIFIED BY '$MIG_PASS';"
+  db_exec "GRANT ALTER, CREATE, DROP, INDEX, SELECT, INSERT, UPDATE, DELETE ON postfix.archive_index TO 'ilexa_mig'@'localhost';"
+  db_exec "GRANT ALL ON postfix.schema_migrations TO 'ilexa_mig'@'localhost';"
+  # Scratch databases for the migration dry-run, which builds and drops a
+  # structure-only shadow of the console tables before touching the real ones.
+  db_exec "GRANT CREATE, DROP, ALTER, SELECT, INSERT ON \`ilexa\_migtest\_%\`.* TO 'ilexa_mig'@'localhost';"
+  db_exec "FLUSH PRIVILEGES;"
+  install -d -m 700 /etc/ilexa/secrets
+  write_file /etc/ilexa/secrets/db-migrate.php 0600 root:root <<PHPCRED
+<?php return ['socket' => '${MYSQL_SOCK:-/var/lib/mysql/mysql.sock}', 'db' => 'postfix',
+              'user' => 'ilexa_mig', 'pass' => '${MIG_PASS}'];
+PHPCRED
+  log_info "migration credential provisioned (ilexa_mig, root-only)"
+fi
+
+# 4. Daily update check. Applying is ALWAYS a human one-click; this only
+#    refreshes what the console displays. Runs as the web user because the
+#    script needs no privilege at all, and wrapped in cron-alert.sh with
+#    CRON_ALERT_STATE_DIR pointed at a directory that user can actually write
+#    (see qa-feed-sample above for why /run silently suppresses alerting).
+write_file /etc/cron.d/ilexa-update-check 0644 root:root <<EOF
+MAILTO=root
+CRON_ALERT_STATE_DIR=/var/cache/quarantine-admin
+17 4 * * * ${WEB_USER} /usr/bin/cron-alert.sh ilexa-update-check /usr/local/sbin/qa-update-check.sh --cron
+EOF
+
 mark_done 55-ilexa
 log_info "55-ilexa done — console at https://${MAIL_FQDN}${ILEXA_URL_PREFIX}"
