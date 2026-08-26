@@ -348,6 +348,42 @@ if [ "$DRY_RUN" != 1 ]; then
   # already taught rspamd for a message (learned_as/learned_at), nothing else
   # -- subject/from/score/is_spam etc. stay read-only even to this user.
   db_exec "GRANT SELECT, UPDATE (learned_as, learned_at) ON postfix.archive_index TO 'qaudit_ro'@'localhost';"
+  # Column-scoped on purpose: `password` is deliberately NOT in this list, so
+  # the console's read-only account can never read a password hash even if the
+  # app is compromised. The named columns are exactly what the console reads --
+  # admin_pwexpiry_coverage() (src/admin.php: domain, email_other, active) and
+  # the sign-in check (src/signin.php: username, active), plus password_expiry
+  # and modified for the expiry reporting.
+  #
+  # Without this the console is BROKEN ON EVERY FRESH INSTALL: the Rendszer
+  # page dies with "1142 SELECT command denied ... for table postfix.mailbox"
+  # and 55-ilexa fails its own smoke test (admin-runtime). It went unnoticed
+  # because the reference host was granted this by hand long ago, so only a
+  # genuinely fresh install ever hits it -- first seen 2026-08-26 on a clean
+  # Ubuntu 24.04 box.
+  db_exec "GRANT SELECT (username, domain, active, email_other, password_expiry, modified) ON postfix.mailbox TO 'qaudit_ro'@'localhost';"
+  # The migration ledger must EXIST before it can be granted on: MariaDB
+  # refuses "GRANT ... ON postfix.schema_migrations" with ERROR 1146 when the
+  # table is absent, and db_exec would abort the module (verified on MariaDB
+  # 10.11, fresh Ubuntu 24.04). Creating it here also resolves the same
+  # chicken-and-egg the reference host hit by hand: a table-level grant cannot
+  # authorise CREATE TABLE for a table that does not exist yet, so the
+  # migration user can never bootstrap its own ledger.
+  #
+  # Definition is kept byte-identical to migration_ensure_ledger_table() in the
+  # app's src/migrate.php -- CREATE TABLE IF NOT EXISTS, so whichever of the two
+  # runs first wins and the other is a no-op.
+  db_exec "CREATE TABLE IF NOT EXISTS postfix.schema_migrations (
+             id INT UNSIGNED NOT NULL PRIMARY KEY,
+             applied_at BIGINT UNSIGNED NOT NULL,
+             checksum CHAR(64) NOT NULL,
+             duration_ms INT UNSIGNED,
+             applied_by VARCHAR(64) NOT NULL DEFAULT ''
+           ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;"
+  # Read-only view of that ledger so the console can render migration status
+  # without a sudo round-trip. Same omission as the mailbox grant above: added
+  # by hand on the reference host when the migration framework shipped.
+  db_exec "GRANT SELECT ON postfix.schema_migrations TO 'qaudit_ro'@'localhost';"
   db_exec "FLUSH PRIVILEGES;"
   write_file /var/cache/quarantine-admin/db.php 0600 "${WEB_USER}:${WEB_GROUP}" <<EOF
 <?php return ['socket' => '${MYSQL_SOCK:-/var/lib/mysql/mysql.sock}', 'db' => 'postfix',

@@ -76,6 +76,43 @@ done
 
 [ "$(id -u)" -eq 0 ] || die "must run as root"
 
+# Refuse to run while a deploy is already in flight. This script re-checks out
+# $SRC_DIR, which is the very directory a running deploy.sh executes from --
+# swapping files under a live run corrupts it in ways that are hard to diagnose.
+#
+# NOT "pgrep -f deploy.sh": -f matches any process whose command line merely
+# CONTAINS the string, including this script's own shell when install.sh is
+# invoked from a one-liner that mentions it. That false positive would block
+# legitimate installs, which is worse than the race it guards against. Walk
+# /proc instead, treat only a real argv token as a match, and skip this
+# process's own ancestry.
+_ancestors() {
+    local p="$$" ppid
+    while [ -n "$p" ] && [ "$p" != 0 ] && [ "$p" != 1 ]; do
+        printf '%s ' "$p"
+        ppid=$(awk '{print $4}' "/proc/$p/stat" 2>/dev/null) || break
+        p="$ppid"
+    done
+}
+_deploy_running() {
+    local skip cmdline tok
+    skip=" $(_ancestors) "
+    for d in /proc/[0-9]*; do
+        case "$skip" in *" ${d#/proc/} "*) continue ;; esac
+        cmdline=$(tr '\0' '\n' < "$d/cmdline" 2>/dev/null) || continue
+        while IFS= read -r tok; do
+            case "$tok" in
+                deploy.sh|*/deploy.sh|run-acceptance.sh|*/run-acceptance.sh) return 0 ;;
+            esac
+        done <<<"$cmdline"
+    done
+    return 1
+}
+if _deploy_running; then
+    die "an ilexa deploy is already running on this host.
+       Wait for it to finish, then re-run.  Progress:  tail -f /var/log/ilexa-install.log"
+fi
+
 # ── Identity ──────────────────────────────────────────────────────────────────
 # Prompt only when there is a real terminal. Under "curl | bash" stdin is the
 # script itself, so read from /dev/tty explicitly or not at all.
