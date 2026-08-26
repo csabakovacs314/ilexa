@@ -142,7 +142,8 @@ show_sysinfo() {
   disk=$(df -h / 2>/dev/null | awk 'NR==2{print $4 " free of " $2 " on /"}')
   ip=$(ip -4 -o addr show scope global 2>/dev/null | awk '{print $4}' | paste -sd' ' -)
   host=$(hostname -f 2>/dev/null || hostname)
-  local info="OS:        ${MD_OS_LABEL:-unknown}
+  local info
+  info="OS:        ${MD_OS_LABEL:-unknown}
 Kernel:    $(uname -r)  ($(uname -m))
 Virt:      ${virt}
 CPU:       ${cpu} vCPU

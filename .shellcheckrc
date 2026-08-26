@@ -1,0 +1,13 @@
+# shellcheck configuration for this repository.
+#
+# SC1090 ("Can't follow non-constant source") is disabled deliberately, not
+# tolerated. Every module begins with `source "$MD_ROOT/lib/common.sh"`, where
+# MD_ROOT is exported by deploy.sh at runtime. That indirection is the design:
+# a module must be runnable both standalone (./deploy.sh --only 20-postfix) and
+# from the sequencer, so the path cannot be a literal. shellcheck -x still
+# follows the sourced file when it can resolve it, so real cross-file checking
+# is unaffected; the warning only fires on the path expression itself.
+#
+# Nothing else is disabled. Every other finding is expected to be FIXED, and
+# tools/lint-all.sh fails the build on any warning that survives this file.
+disable=SC1090

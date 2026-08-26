@@ -536,13 +536,18 @@ pf_check_params() {
   # an empty value (relayhost on most hosts) still prints one empty line, so
   # line count separates the two where captured output cannot: command
   # substitution strips the trailing newline and both look like "".
-  local missing="" k n
+  # Named "unknown", not "missing": another function in this file uses an ARRAY
+  # called missing, and one name meaning two shapes in one file is both a false
+  # alarm from shellcheck (SC2128/SC2178) and a genuine trap for a reader.
+  # (Do not start a comment line with the word shellcheck -- it is parsed as a
+  # directive and an unparseable one is a hard error, SC1072/SC1073.)
+  local unknown="" k n
   for k in "$@"; do
     n=$(postconf -h "$k" 2>/dev/null | wc -l)
-    [ "${n:-0}" -ge 1 ] || missing="$missing $k"
+    [ "${n:-0}" -ge 1 ] || unknown="$unknown $k"
   done
-  if [ -n "$missing" ]; then
-    log_warn "this Postfix ($(postconf -h mail_version 2>/dev/null)) does not know:${missing}"
+  if [ -n "$unknown" ]; then
+    log_warn "this Postfix ($(postconf -h mail_version 2>/dev/null)) does not know:${unknown}"
     log_warn "  those settings were written but will have NO effect — check the Postfix release notes for renames"
     return 1
   fi

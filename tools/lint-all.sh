@@ -8,17 +8,24 @@
 # executed mid-deploy. This script is the gate: deploy.sh runs it first and
 # aborts before touching a live host if it fails.
 #
-# Exit 0: clean, or only shellcheck warnings (style-level; today's baseline
-#         is 7, all reviewed as benign -- 2 SC2155 nits, 5 expected SC1090 on
-#         lib/os.sh's dynamic `source`). Exit 1: any bash -n syntax error, or
-#         any shellcheck error-severity finding.
+# Exit 0 requires a CLEAN sweep. Exit 1: any bash -n syntax error, a missing
+# path, or any finding at error OR warning severity.
+#
+# Warnings used to be tolerated ("today's baseline is 7, all reviewed as
+# benign"), which is how a baseline dies: nobody re-reviews it, it drifts
+# upward, and by 2026-08-26 it was 13 -- including an array/string name
+# collision and a dead assignment nobody had looked at in months. Every one was
+# then fixable in a single sitting. The intentional exemption, SC1090 on the
+# dynamic `source "$MD_ROOT/lib/common.sh"` every module needs, is declared
+# once in .shellcheckrc with its reasoning, so the gate can hold at zero
+# instead of carrying a number that only ever grows.
 #
 #   tools/lint-all.sh            run the full sweep
 #   tools/lint-all.sh --quiet    only print failures (for use from deploy.sh)
 set -uo pipefail
 
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-cd "$HERE"
+cd "$HERE" || exit 1
 
 quiet=0
 [ "${1:-}" = "--quiet" ] && quiet=1
@@ -28,7 +35,13 @@ quiet=0
 # error in one would only surface when the rendered copy ran on a real host.
 # @@KEY@@ placeholders parse as ordinary words, so bash -n/shellcheck handle
 # them unrendered (verified against all four templates).
-mapfile -t files < <(find modules lib assets templates -type f \( -name '*.sh' -o -name '*.sh.tmpl' \) 2>/dev/null | sort; find . -maxdepth 1 -type f -name '*.sh' | sort)
+# tools/ is included deliberately. It was omitted for a long time, so ~900
+# lines -- release.sh, export-public.sh, check-answers.sh and this script
+# itself -- were never linted by the gate that claims to lint everything. Two
+# real findings were sitting there undetected (a dead assignment, and a cd
+# without || exit) and only surfaced when shellcheck was run by hand across
+# git ls-files on 2026-08-26.
+mapfile -t files < <(find modules lib assets templates tools -type f \( -name '*.sh' -o -name '*.sh.tmpl' \) 2>/dev/null | sort; find . -maxdepth 1 -type f -name '*.sh' | sort)
 
 fail=0
 syntax_fail=0
@@ -115,7 +128,19 @@ elif [ "$quiet" != 1 ]; then
   echo "$ans_out" | tail -1
 fi
 
+# Bash constructs that shellcheck accepts but that have bitten this project.
+fg_out="$("$HERE/tools/check-footguns.sh" 2>&1)"; fg_rc=$?
+if [ "$fg_rc" != 0 ]; then
+  echo "$fg_out"
+  fail=1
+elif [ "$quiet" != 1 ]; then
+  echo "$fg_out" | tail -1
+fi
+
 echo "lint-all: ${#files[@]} scripts checked -- $syntax_fail syntax errors, $sc_errors shellcheck errors, $sc_warnings shellcheck warnings, $path_fail missing paths"
 
 [ "$fail" = 1 ] && exit 1
+# A surviving warning is a failure. Anything genuinely acceptable belongs in
+# .shellcheckrc with a written reason, not in an unwritten tolerance here.
+[ "$sc_warnings" -gt 0 ] && { echo "lint-all: $sc_warnings shellcheck warning(s) -- fix them, or justify an exemption in .shellcheckrc" >&2; exit 1; }
 exit 0

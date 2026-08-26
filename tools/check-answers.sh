@@ -50,9 +50,13 @@ exempt_key() {
 [ -r "$ANSWERS" ] || { echo "check-answers: cannot read $ANSWERS" >&2; exit 2; }
 [ -r "$DEPLOY" ]  || { echo "check-answers: cannot read $DEPLOY" >&2; exit 2; }
 
-# The export_config() body, and the apply_defaults() body, as flat text.
+# The export_config() body, as flat text.
+#
+# apply_defaults() is deliberately NOT extracted: the check that would have
+# consumed it was dropped on purpose (see the note in the loop below on why a
+# missing default is not reportable), leaving an assignment nothing read -- a
+# sed over deploy.sh executed on every lint for no result.
 exports="$(sed -n '/^export_config()/,/^}/p' "$DEPLOY")"
-defaults="$(sed -n '/^apply_defaults()/,/^}/p' "$DEPLOY")"
 
 n_checked=0
 while IFS= read -r key; do

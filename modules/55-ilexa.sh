@@ -98,8 +98,10 @@ export MD_VAR_POSTFIXADMIN_URL="${POSTFIXADMIN_URL-/postfixadmin/}"
 # The same list in two syntaxes, from one answer, because config.php and
 # qa-doveadm.sh both need it and disagreeing is a silent failure: the gateway
 # refuses a folder the UI happily offers.
-export MD_VAR_QUARANTINE_FOLDERS="$(printf '"%s" ' $QUARANTINE_FOLDERS)"        # bash array
-export MD_VAR_QUARANTINE_FOLDERS_PHP="$(printf "'%s', " $QUARANTINE_FOLDERS | sed 's/, $//')"  # php array
+MD_VAR_QUARANTINE_FOLDERS="$(printf '"%s" ' $QUARANTINE_FOLDERS)"        # bash array
+export MD_VAR_QUARANTINE_FOLDERS
+MD_VAR_QUARANTINE_FOLDERS_PHP="$(printf "'%s', " $QUARANTINE_FOLDERS | sed 's/, $//')"  # php array
+export MD_VAR_QUARANTINE_FOLDERS_PHP
 
 render_app "$SRC/install/config.php.tmpl" "$SRC/config.php"
 
