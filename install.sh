@@ -443,6 +443,25 @@ _close() { # glyph colour
 set +e
 "${CMD[@]}" 2>&1 | while IFS= read -r line; do
     case "$line" in
+        # --acceptance runs deploy TWICE (install, then an idempotency re-run)
+        # and interleaves seven check phases. Without these cases the module
+        # counter sails past its total on the second pass and the PASS/FAIL
+        # lines -- which are the entire point of an acceptance run -- are
+        # filtered out as noise.
+        "====="*)
+            _close "$G_OK" "$C_G"
+            DONE=0
+            printf '\n  %s%s %s%s\n' "$C_B" "$G_RUN" \
+                "$(printf '%s' "$line" | sed -E 's/^=+ *//; s/ *=+$//')" "$C_0"
+            ;;
+        "PASS: "*)
+            printf '      %s%s%s %s\n' "$C_G" "$G_OK" "$C_0" "${line#PASS: }" ;;
+        "FAIL: "*)
+            printf '      %s%s %s%s\n' "$C_R" "$G_NO" "${line#FAIL: }" "$C_0" ;;
+        # No counter kept here: this loop is the right-hand side of a pipe and
+        # runs in a subshell, so anything it tallies is gone by the summary.
+        # $RC carries the verdict, and each FAIL line is printed as it arrives.
+        "ACCEPTANCE:"*) _close "$G_OK" "$C_G" ;;
         *"=== module "*)
             _close "$G_OK" "$C_G"
             CUR=$(printf '%s' "$line" | sed -n 's/.*=== module \([0-9]*-[0-9a-z-]*\) ===.*/\1/p')
@@ -471,7 +490,16 @@ FAILED=$(grep -oE '\[ERROR\] module [0-9]+-[0-9a-z-]+ failed' "$LOG" 2>/dev/null
 
 ELAPSED=$(( $(date +%s) - START ))
 echo
-if [ "$RC" -eq 0 ]; then
+if [ "$RC" -eq 0 ] && [ "$MODE" = acceptance ]; then
+    banner "ACCEPTANCE PASSED  ($((ELAPSED/60))m $((ELAPSED%60))s)" \
+           "deployed, verified, and re-run clean for idempotency" \
+           "console   https://${FQDN}/ilexa/" \
+           "log       $LOG"
+elif [ "$RC" -ne 0 ] && [ "$MODE" = acceptance ]; then
+    printf '%s%s ACCEPTANCE FAILED%s\n\n' "$C_R" "$G_NO" "$C_0"
+    say "the FAIL lines above are the checks that did not pass"
+    say "full log: $LOG    re-run with -v to watch everything"
+elif [ "$RC" -eq 0 ]; then
     banner "Install complete  ($((ELAPSED/60))m $((ELAPSED%60))s)" \
            "console   https://${FQDN}/ilexa/" \
            "login     /root/ilexa-install-credentials.txt" \
