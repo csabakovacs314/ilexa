@@ -479,6 +479,15 @@ EOF
 # and Ubuntu packages no GeoLite2 mmdb at all). Without this stack every
 # sender-country flag silently never renders and sender_cc stays NULL.
 if [ "$PKG_MGR" = apt ]; then pkg_install mmdb-bin; else pkg_install libmaxminddb; fi
+
+# The sqlite3 BINARY, not just PHP's driver. The console reads iocs.db and
+# logins.db through PDO, so nothing here needs the CLI -- but qa-update-apply.sh
+# shells out to `sqlite3 ... ".backup"` to snapshot them before an update, and
+# its preflight refuses to run without it. Every fresh install therefore failed
+# one-click updates with ERR_PREFLIGHT_BIN_sqlite3, while the reference host
+# happened to have the package pulled in by something else. Same package on
+# both families.
+pkg_install sqlite3
 if [ "$DRY_RUN" != 1 ] && [ ! -e /usr/share/GeoIP/GeoLite2-Country.mmdb ]; then
   /usr/local/sbin/qa-geoipdb-refresh.sh \
     && log_info "GeoIP country database installed (db-ip lite)" \
