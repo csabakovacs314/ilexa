@@ -31,9 +31,47 @@ REF="main"
 ANSWERS_OUT="${ILEXA_ANSWERS:-/root/answers.conf}"
 FQDN="" DOMAIN="" EMAIL="" TLS="auto"
 MODE="deploy"          # deploy | acceptance
-DRY_RUN=0 ASSUME_YES=0 CHECK_ONLY=0 FORCE=0
+DRY_RUN=0 ASSUME_YES=0 CHECK_ONLY=0 FORCE=0 VERBOSE=0
 
 FAILS=0 WARNS=0
+
+# ── Presentation ──────────────────────────────────────────────────────────────
+# Colour only when stdout is a terminal: piping the installer into a file or a
+# pager must not embed escape codes. Box glyphs only when the locale can render
+# them -- a UTF-8 box on a latin1 console is worse than plain ASCII.
+if [ -t 1 ]; then
+    C_DIM=$'\033[2m'; C_B=$'\033[1m'; C_G=$'\033[32m'; C_Y=$'\033[33m'; C_R=$'\033[31m'; C_0=$'\033[0m'
+    # Erase to end of line. The "running…" line is longer than the line that
+    # replaces it, so a bare \r would leave the tail of the old text visible.
+    C_EL=$'\033[K'
+else
+    C_DIM=""; C_B=""; C_G=""; C_Y=""; C_R=""; C_0=""; C_EL=""
+fi
+case "${LC_ALL:-${LC_CTYPE:-${LANG:-}}}" in
+    *[Uu][Tt][Ff]8*|*[Uu][Tt][Ff]-8*)
+        G_OK="✓"; G_NO="✗"; G_WARN="⚠"; G_RUN="•"
+        B_TL="┌"; B_TR="┐"; B_BL="└"; B_BR="┘"; B_H="─"; B_V="│" ;;
+    *)
+        G_OK="OK"; G_NO="XX"; G_WARN="!!"; G_RUN=">"
+        B_TL="+"; B_TR="+"; B_BL="+"; B_BR="+"; B_H="-"; B_V="|" ;;
+esac
+
+# A framed banner. Width is fixed at 62 so it does not reflow on resize.
+banner() { # title line...
+    local w=62 t="$1" rule i; shift
+    # Built with a loop, NOT "printf %62s | tr ' ' '─'": tr maps BYTES, and the
+    # box-drawing characters are 3 bytes each in UTF-8, so tr emitted a broken
+    # first byte 62 times and the rule rendered as replacement characters.
+    rule=""; for ((i=0; i<w; i++)); do rule="${rule}${B_H}"; done
+    printf '\n%s%s%s%s%s\n' "$C_B" "$B_TL" "$rule" "$B_TR" "$C_0"
+    printf '%s%s%s %-*s %s%s%s\n' "$C_B" "$B_V" "$C_0" "$((w-2))" "$t" "$C_B" "$B_V" "$C_0"
+    local l
+    for l in "$@"; do
+        printf '%s%s%s %s%-*s%s %s%s%s\n' "$C_B" "$B_V" "$C_0" "$C_DIM" "$((w-2))" "$l" "$C_0" "$C_B" "$B_V" "$C_0"
+    done
+    printf '%s%s%s%s%s\n\n' "$C_B" "$B_BL" "$rule" "$B_BR" "$C_0"
+}
+
 
 say()  { printf '  %s\n' "$*"; }
 step() { printf '\n\033[1m== %s\033[0m\n' "$*"; }
@@ -69,6 +107,9 @@ Optional:
   --acceptance        deploy + verify + idempotency re-run
   --dry-run           rehearse every module, change nothing
   --force             continue even if a check FAILED
+  -v, --verbose       show every line the installer prints (default: a progress
+                      summary only; the full log is always written to
+                      /var/log/ilexa-install.log either way)
   --yes               skip the confirmation prompt
   --help              this text
 USAGE
@@ -85,6 +126,7 @@ while [ $# -gt 0 ]; do
         --acceptance) MODE="acceptance"; shift ;;
         --dry-run)    DRY_RUN=1; shift ;;
         --force)      FORCE=1; shift ;;
+        --verbose|-v) VERBOSE=1; shift ;;
         --yes|-y)     ASSUME_YES=1; shift ;;
         --help|-h)    usage; exit 0 ;;
         *) die "unknown option: $1  (try --help)" ;;
@@ -284,6 +326,7 @@ fi
 
 # ── Phase 2: PLAN ─────────────────────────────────────────────────────────────
 step "2/3  What will happen"
+banner "ilexa installer" "$FQDN" "domain $DOMAIN · admin $EMAIL · TLS $TLS"
 cat <<PLAN
   FQDN            $FQDN
   Mail domain     $DOMAIN
@@ -355,13 +398,89 @@ _set TLS_MODE "$TLS"
 # 75-tls-dns runs, so --standalone cannot bind :80 on a fresh install.
 [ "$TLS" = letsencrypt ] && _set CERTBOT_METHOD webroot
 
-say "handing over to deploy.sh — progress below, full log in /var/log/ilexa-install.log"
-echo
 cd "$SRC_DIR"
-if [ "$DRY_RUN" = 1 ]; then
-    exec bash deploy.sh --dry-run --answers "$ANSWERS_OUT"
-elif [ "$MODE" = acceptance ]; then
-    exec bash ci/run-acceptance.sh "$ANSWERS_OUT"
-else
-    exec bash deploy.sh --answers "$ANSWERS_OUT"
+TOTAL=$(ls modules/*.sh 2>/dev/null | wc -l)
+
+# Build the command without running it, so verbose and quiet share one definition.
+if [ "$DRY_RUN" = 1 ];        then CMD=(bash deploy.sh --dry-run --answers "$ANSWERS_OUT")
+elif [ "$MODE" = acceptance ]; then CMD=(bash ci/run-acceptance.sh "$ANSWERS_OUT")
+else                               CMD=(bash deploy.sh --answers "$ANSWERS_OUT")
 fi
+
+if [ "$VERBOSE" = 1 ]; then
+    say "verbose: every line shown; full log also in /var/log/ilexa-install.log"
+    echo
+    "${CMD[@]}"
+    exit $?
+fi
+
+# ── Quiet renderer ────────────────────────────────────────────────────────────
+# deploy.sh is loud by design -- module logs plus raw apt/dpkg output. That is
+# the right default for a log file and the wrong one for a person watching an
+# install: the signal (which module, did it work) is buried. Filter to one line
+# per module here rather than making deploy.sh quieter, because deploy.sh is
+# also driven by ci/run-acceptance.sh and by operators re-running single
+# modules, and both want the full stream.
+#
+# Nothing is discarded: deploy.sh writes everything to /var/log/ilexa-install.log
+# regardless, and on failure the tail of that file is printed automatically --
+# quiet mode must never leave someone with a bare "failed" and no context.
+say "installing — full log: /var/log/ilexa-install.log"
+echo
+LOG=/var/log/ilexa-install.log
+START=$(date +%s)
+CUR="" CUR_T=0 DONE=0 MOD_WARN=0 FAILED=""
+
+_close() { # glyph colour
+    [ -n "$CUR" ] || return 0
+    local el=$(( $(date +%s) - CUR_T )) extra=""
+    [ "$MOD_WARN" -gt 0 ] && extra=" ${C_Y}${G_WARN}${MOD_WARN}${C_0}"
+    printf '\r%s  %s[%2d/%2d]%s %-22s %s%s%s %s%3ds%s%s\n' "$C_EL" \
+        "$C_DIM" "$DONE" "$TOTAL" "$C_0" "$CUR" "$2" "$1" "$C_0" "$C_DIM" "$el" "$C_0" "$extra"
+    CUR="" MOD_WARN=0
+}
+
+set +e
+"${CMD[@]}" 2>&1 | while IFS= read -r line; do
+    case "$line" in
+        *"=== module "*)
+            _close "$G_OK" "$C_G"
+            CUR=$(printf '%s' "$line" | sed -n 's/.*=== module \([0-9]*-[0-9a-z-]*\) ===.*/\1/p')
+            CUR=${CUR#*-}
+            DONE=$((DONE+1)); CUR_T=$(date +%s)
+            printf '  %s[%2d/%2d]%s %-22s %s%s running…%s' \
+                "$C_DIM" "$DONE" "$TOTAL" "$C_0" "$CUR" "$C_DIM" "$G_RUN" "$C_0"
+            ;;
+        *"[WARN]"*)   MOD_WARN=$((MOD_WARN+1)) ;;
+        *"[ERROR]"*)  FAILED="$CUR"; _close "$G_NO" "$C_R"
+                      printf '  %s%s %s%s\n' "$C_R" "$G_NO" "${line#*\[ERROR\] }" "$C_0" ;;
+        *"deploy complete"*)      _close "$G_OK" "$C_G" ;;
+        *"verification passed"*)  : ;;
+    esac
+done
+RC=${PIPESTATUS[0]}
+set -e
+
+# The loop above ran in a subshell (right-hand side of a pipe), so anything it
+# assigned -- FAILED included -- is gone by now. Recover the failing module from
+# the log rather than from a variable that cannot survive.
+# "|| true" is load-bearing under set -e: on a SUCCESSFUL run there is no
+# "[ERROR] module ... failed" line, grep exits 1, and the script would die here
+# -- swallowing the completion banner after a perfectly good install.
+FAILED=$(grep -oE '\[ERROR\] module [0-9]+-[0-9a-z-]+ failed' "$LOG" 2>/dev/null | tail -1 | sed -E 's/.*module ([0-9]+-[0-9a-z-]+) failed/\1/') || true
+
+ELAPSED=$(( $(date +%s) - START ))
+echo
+if [ "$RC" -eq 0 ]; then
+    banner "Install complete  ($((ELAPSED/60))m $((ELAPSED%60))s)" \
+           "console   https://${FQDN}/ilexa/" \
+           "login     /root/ilexa-install-credentials.txt" \
+           "log       $LOG"
+else
+    printf '%s%s install failed%s%s\n\n' "$C_R" "$G_NO" "$C_0" "${FAILED:+ in $FAILED}"
+    say "last 20 log lines:"
+    tail -20 "$LOG" 2>/dev/null | sed 's/^/    /'
+    echo
+    say "full log: $LOG    re-run with -v to watch everything"
+fi
+exit "$RC"
