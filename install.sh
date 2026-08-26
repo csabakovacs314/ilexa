@@ -149,9 +149,24 @@ case "$TLS" in
     letsencrypt|selfsigned) ;;
     auto)
         # Does the name already point at one of this host's own addresses?
-        # getent uses the libc resolver, so this needs no extra package.
+        #
+        # Ask DNS directly when a resolver tool exists. getent alone is not
+        # enough: it consults /etc/hosts FIRST, and this stack's own base module
+        # adds "127.0.1.1 <fqdn>" there (the Debian/Ubuntu hostname convention).
+        # On a re-run that makes the FQDN look like loopback, so auto picked
+        # selfsigned for a name whose public DNS was perfectly correct --
+        # observed 2026-08-26. Loopback answers are therefore discarded.
         _mine=" $(hostname -I 2>/dev/null || true) "
-        _theirs="$(getent ahostsv4 "$FQDN" 2>/dev/null | awk '{print $1}' | sort -u)"
+        _theirs=""
+        if command -v dig >/dev/null 2>&1; then
+            _theirs="$(dig +short A "$FQDN" 2>/dev/null | grep -E '^[0-9.]+$' || true)"
+        elif command -v host >/dev/null 2>&1; then
+            _theirs="$(host -t A "$FQDN" 2>/dev/null | awk '/has address/{print $NF}' || true)"
+        fi
+        if [ -z "$_theirs" ]; then
+            _theirs="$(getent ahostsv4 "$FQDN" 2>/dev/null | awk '{print $1}' | sort -u \
+                       | grep -v '^127\.' || true)"
+        fi
         TLS="selfsigned"
         for _ip in $_theirs; do
             case "$_mine" in *" $_ip "*) TLS="letsencrypt"; break ;; esac
