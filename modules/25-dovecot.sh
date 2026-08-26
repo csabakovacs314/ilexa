@@ -24,12 +24,32 @@ load_secrets   # POSTFIX_DB_USER / POSTFIX_DB_PASS (dovecot reuses the postfix D
 # replacing rather than being mistaken for a real, already-issued cert.
 if [ "$DRY_RUN" != 1 ] && [ ! -e "$TLS_CERT" ]; then
   install -d "$(dirname "$TLS_CERT")" "$(dirname "$TLS_KEY")"
+  # A DANGLING SYMLINK at either path satisfies "! -e" (test -e follows the
+  # link) but openssl then writes THROUGH it into a directory that no longer
+  # exists and fails with "Can't open ... for writing". That state is ordinary:
+  # these paths are symlinks into /etc/letsencrypt/live, so removing or
+  # restoring certbot's tree leaves them pointing at nothing.
+  #
+  # Left unhandled the consequence is badly disguised: bootstrap only warns,
+  # then the next package whose postinst restarts dovecot fails, dpkg returns
+  # 1, and the module dies reporting "apt install failed: dovecot-fts-xapian"
+  # -- which looks like a broken package and is nothing of the sort. Observed
+  # 2026-08-26.
+  for _p in "$TLS_CERT" "$TLS_KEY"; do
+    if [ -L "$_p" ] && [ ! -e "$_p" ]; then
+      rm -f "$_p"
+      log_warn "removed dangling symlink at $_p (target gone) before bootstrapping a placeholder"
+    fi
+  done
   if openssl req -x509 -newkey rsa:2048 -nodes -days 1 \
        -keyout "$TLS_KEY" -out "$TLS_CERT" -subj "/CN=bootstrap-placeholder" >/dev/null 2>&1; then
     mkdir -p "$MD_STATE_DIR"; : > "$MD_STATE_DIR/tls-bootstrap-placeholder.flag"
     log_info "bootstrapped a throwaway self-signed cert so dovecot can start before 75-tls-dns runs"
   else
-    log_warn "bootstrap cert generation failed — dovecot may fail to (re)start until 75-tls-dns runs"
+    # Not just a warning: without a loadable cert the very next package that
+    # restarts dovecot takes the whole module down with an unrelated-looking
+    # apt error, so say plainly here what actually went wrong.
+    log_warn "bootstrap cert generation failed at $TLS_CERT — dovecot will fail to (re)start, and the next package postinst that restarts it will abort this module with a misleading 'apt install failed' error. Check that $(dirname "$TLS_CERT") is writable and holds no dangling symlinks."
   fi
 fi
 
