@@ -1,8 +1,30 @@
 {
     "schema": 1,
-    "serial": 8,
+    "serial": 9,
     "channel": "stable",
     "releases": [
+        {
+            "version": "1.0.8",
+            "codename": "Duna",
+            "tag": "v1.0.8",
+            "released_at": "2026-08-26",
+            "commit": "56ab100",
+            "severity": "feature",
+            "requires_installer": false,
+            "min_upgrade_from": "0.0.0",
+            "schema_version": {
+                "mysql": 1,
+                "iocs": 2,
+                "logins": 3
+            },
+            "app_tarball": {
+                "path": "assets/ilexa-app.tar.gz",
+                "sha256": "3f7d2a3f48750e2029ada525ce50199e6bfc0d43ca663a6af17118aa044715f2",
+                "size": 1884030
+            },
+            "notes_hu": "Az ilexa verzio megjelenik a Rendszer-informacios panelen, szinjelzessel.",
+            "notes_en": "The installed ilexa version now appears in the System-info panel, colour-coded."
+        },
         {
             "version": "1.0.7",
             "codename": "Duna",
@@ -180,6 +202,6 @@
             "notes_en": "Baseline release: version display, update checking, database migration framework."
         }
     ],
-    "latest": "1.0.7",
-    "generated_at": "2026-08-25T20:46:55Z"
+    "latest": "1.0.8",
+    "generated_at": "2026-08-26T08:45:49Z"
 }
