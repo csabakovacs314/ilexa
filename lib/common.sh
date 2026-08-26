@@ -280,7 +280,17 @@ dns_extra_block() { # owner  (body on stdin)
   ' "$DNS_EXTRA_FILE" > "$tmp"
   # Pre-marker installs appended an unmarked copy of their block on every run;
   # those are left alone (we only delete what we marked) but are worth naming.
-  if grep -qE '^# ===== (autoconfig / autodiscover|MTA-STS)' "$tmp"; then
+  #
+  # Look ONLY outside marker pairs. The "# ===== ..." headings this check keys
+  # on also appear INSIDE properly-marked blocks written by this very run, so
+  # grepping the whole file made every install accuse itself of leftovers from
+  # "an older installer" -- and it fired once per owner that wrote after the
+  # first, i.e. twice on a completely fresh host (observed 2026-08-26).
+  if awk '
+       /^# >>> ilexa:/ { inblk = 1; next }
+       /^# <<< ilexa:/ { inblk = 0; next }
+       !inblk          { print }
+     ' "$tmp" | grep -qE '^# ===== (autoconfig / autodiscover|MTA-STS)'; then
     log_warn "$DNS_EXTRA_FILE still holds unmarked block(s) from an older installer -- harmless duplicates in an operator notes file, safe to delete by hand"
   fi
   # The blank separator goes INSIDE the markers, so removing the block removes

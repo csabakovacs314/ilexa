@@ -76,7 +76,18 @@ fi
 # renders as an empty cell. The feature degrades to nothing rather than
 # breaking the archive, but an operator who is never told will reasonably
 # assume the flags are broken.
-pkg_try libmaxminddb >/dev/null 2>&1 || pkg_try libmaxminddb0 >/dev/null 2>&1 || true
+# Branch on the package manager rather than probing: the reader is
+# "libmaxminddb" on EL and "libmaxminddb0" on Debian/Ubuntu. Trying the EL name
+# first on Ubuntu works -- the fallback catches it -- but pkg_try logs
+# "apt install failed: libmaxminddb" on the way past, so a completely healthy
+# install grows a WARN that reads like a broken dependency. Reported on a clean
+# 24.04 box 2026-08-26; the reader and mmdblookup were both present and country
+# lookup worked, the message was pure noise.
+if [ "$PKG_MGR" = apt ]; then
+  pkg_try libmaxminddb0 >/dev/null 2>&1 || true
+else
+  pkg_try libmaxminddb  >/dev/null 2>&1 || true
+fi
 if [ "$DRY_RUN" != 1 ]; then
   if [ -r /usr/share/GeoIP/GeoLite2-Country.mmdb ]; then
     log_info "GeoLite2 country DB found — Archívum will show sender-country flags"
