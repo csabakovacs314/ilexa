@@ -77,23 +77,117 @@ _addrs_of() { # name
 # telling the operator what to create and that re-running picks it up -- rather
 # than being silently dropped, which would leave Thunderbird and Outlook
 # autoconfig failing on a certificate mismatch with nothing to explain why.
+# Resolve a name against its zone's AUTHORITATIVE nameservers, bypassing the
+# local resolver cache. Needed by the re-check prompt below: a name that was
+# just looked up and did not exist is negatively cached (SOA minimum, often
+# minutes), so an operator who adds the record and immediately re-checks would
+# otherwise be told it still does not exist.
+_addrs_authoritative() { # name
+  local n="$1" zone ns a=""
+  zone="${n#*.}"
+  ns="$(dig +short NS "$zone" 2>/dev/null | head -1)"
+  [ -n "$ns" ] || { _addrs_of "$n"; return; }
+  a="$(dig +short A "$n" "@${ns%.}" 2>/dev/null | grep -E '^[0-9.]+$' | sort -u)"
+  a="$a $(dig +short AAAA "$n" "@${ns%.}" 2>/dev/null | grep -E ':' | sort -u)"
+  printf '%s' "$(printf '%s' "$a" | tr -s ' \n' '\n' | sed '/^$/d' | sort -u)"
+}
+
+# The optional SAN names this configuration wants, one per line.
+_wanted_optional_names() {
+  local d
+  [ "${ENABLE_MTA_STS:-no}" = yes ] && for d in $PRIMARY_DOMAIN $EXTRA_DOMAINS; do echo "mta-sts.$d"; done
+  [ "${ENABLE_AUTOCONFIG:-no}" = yes ] && for d in $PRIMARY_DOMAIN $EXTRA_DOMAINS; do echo "autoconfig.$d"; echo "autodiscover.$d"; done
+  true
+}
+
+# Print the exact records the operator has to create, so the fix is in front of
+# them at the moment they are asked about it -- not only in a notes file written
+# at the end of the run, which is what made this a two-pass problem before.
+_print_dns_fix() { # names...
+  local n
+  echo
+  echo "  These names are not pointing at this host yet:"
+  for n in "$@"; do echo "      $n"; done
+  echo
+  echo "  Create one CNAME per name, all pointing at the mail host."
+  echo "  Most DNS panels want just the LABEL in the name field:"
+  printf '      %-14s %-30s %s\n' "TYPE" "NAME (label)" "TARGET"
+  for n in "$@"; do printf '      %-14s %-30s %s\n' "CNAME" "${n%%.*}" "$MAIL_FQDN"; done
+  echo "      (full names: $*)"
+  echo
+  echo "  In Cloudflare set them to DNS-only (grey cloud); a proxied record"
+  echo "  answers with Cloudflare's addresses and the check below will fail."
+  echo
+}
+
+# Ask certbot ONLY for names that already point at this host.
+#
+# mta-sts, autoconfig and autodiscover are extra SANs whose DNS records rarely
+# exist on a first install. Let's Encrypt fails the WHOLE multi-name order if
+# any one of them cannot be authenticated ("Certbot failed to authenticate some
+# domains"), and the FQDN-only retry is what actually issues -- so every fresh
+# install logged an alarming-looking failure that was in fact routine (observed
+# on Ubuntu 24.04, 2026-08-17).
+#
+# Worse than the noise: a name pointed elsewhere keeps failing the order on
+# every renewal, and renewals are unattended.
+#
+# So each optional name must resolve to an address MAIL_FQDN also resolves to
+# before it is requested. When some do not and a terminal is available, show
+# the records to create and offer to re-check -- the certificate is issued once
+# per run, and getting the names in on THIS pass avoids a second one.
 build_cert_names() {
-  CERT_NAMES=(-d "$MAIL_FQDN")
-  local d n host_addrs cand_addrs
-  host_addrs="$(_addrs_of "$MAIL_FQDN")"
-  for n in $(
-        [ "${ENABLE_MTA_STS:-no}" = yes ] && for d in $PRIMARY_DOMAIN $EXTRA_DOMAINS; do echo "mta-sts.$d"; done
-        [ "${ENABLE_AUTOCONFIG:-no}" = yes ] && for d in $PRIMARY_DOMAIN $EXTRA_DOMAINS; do echo "autoconfig.$d"; echo "autodiscover.$d"; done
-        true
-      ); do
-    cand_addrs="$(_addrs_of "$n")"
-    if [ -z "$cand_addrs" ]; then
-      log_warn "skipping $n in the certificate: it does not resolve yet. Create the DNS record shown at the end of this run (CNAME -> $MAIL_FQDN), then re-run --only 75-tls-dns to add it."
-    elif [ -z "$(comm -12 <(printf '%s\n' $host_addrs | sort -u) <(printf '%s\n' $cand_addrs | sort -u))" ]; then
-      log_warn "skipping $n in the certificate: it resolves elsewhere ($(printf '%s' "$cand_addrs" | tr '\n' ' ')) and not to this host ($(printf '%s' "$host_addrs" | tr '\n' ' ')). Requesting it would fail the whole order, including at renewal."
-    else
-      CERT_NAMES+=(-d "$n")
+  local n host_addrs cand_addrs missing ans
+  while :; do
+    CERT_NAMES=(-d "$MAIL_FQDN")
+    missing=()
+    host_addrs="$(_addrs_of "$MAIL_FQDN")"
+    for n in $(_wanted_optional_names); do
+      cand_addrs="$(_addrs_of "$n")"
+      if [ -z "$cand_addrs" ]; then
+        missing+=("$n")
+      elif [ -z "$(comm -12 <(printf '%s\n' $host_addrs | sort -u) <(printf '%s\n' $cand_addrs | sort -u))" ]; then
+        log_warn "skipping $n in the certificate: it resolves elsewhere ($(printf '%s' "$cand_addrs" | tr '\n' ' ')) and not to this host ($(printf '%s' "$host_addrs" | tr '\n' ' ')). Requesting it would fail the whole order, including at renewal."
+      else
+        CERT_NAMES+=(-d "$n")
+      fi
+    done
+
+    [ "${#missing[@]}" -gt 0 ] || return 0
+
+    # No terminal (unattended run, cron, piped installer): keep the previous
+    # behaviour exactly -- warn per name and carry on with an FQDN-only cert.
+    #
+    # The test must OPEN /dev/tty, not stat it: -r/-w only check permissions on
+    # the device node, which pass even when the process has no controlling
+    # terminal. Getting this wrong made an unattended run fall into the prompt,
+    # fail the read, and log the wrong reason ("at the operator's request") for
+    # a skip nobody was asked about.
+    if ! { true >/dev/tty; } 2>/dev/null || [ "${MD_ASSUME_YES:-0}" = 1 ]; then
+      for n in "${missing[@]}"; do
+        log_warn "skipping $n in the certificate: it does not resolve yet. Create the DNS record shown at the end of this run (CNAME -> $MAIL_FQDN), then re-run --only 75-tls-dns to add it."
+      done
+      return 0
     fi
+
+    _print_dns_fix "${missing[@]}" > /dev/tty
+    printf '  [R] re-check DNS   [S] skip these names and continue  > ' > /dev/tty
+    read -r ans < /dev/tty || ans=S
+    case "$ans" in
+      r|R|'')
+        # Ask the authoritative servers, not the local cache, so a record added
+        # seconds ago is actually seen.
+        for n in "${missing[@]}"; do
+          printf '      %-32s %s\n' "$n" "$(_addrs_authoritative "$n" | tr '\n' ' ' | sed 's/ $//' || true)" > /dev/tty
+        done
+        printf '\n' > /dev/tty
+        continue ;;
+      *)
+        for n in "${missing[@]}"; do
+          log_warn "skipping $n in the certificate at the operator's request. Create the CNAME later, then: ./deploy.sh --only 75-tls-dns --answers <answers file>"
+        done
+        return 0 ;;
+    esac
   done
 }
 [ "$DRY_RUN" = 1 ] || install -d -m 755 "${TLS_DIR:-/etc/ssl/ilexa}"
