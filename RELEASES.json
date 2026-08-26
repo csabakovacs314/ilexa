@@ -1,8 +1,30 @@
 {
     "schema": 1,
-    "serial": 13,
+    "serial": 14,
     "channel": "stable",
     "releases": [
+        {
+            "version": "1.0.13",
+            "codename": "Duna",
+            "tag": "v1.0.13",
+            "released_at": "2026-08-26",
+            "commit": "f116491",
+            "severity": "fix",
+            "requires_installer": false,
+            "min_upgrade_from": "0.0.0",
+            "schema_version": {
+                "mysql": 1,
+                "iocs": 2,
+                "logins": 3
+            },
+            "app_tarball": {
+                "path": "assets/ilexa-app.tar.gz",
+                "sha256": "02c346ec3ef7785f884ef8c4a29d8716483b90b6999aa82fec91d8694024e657",
+                "size": 1886603
+            },
+            "notes_hu": "A frissito tarball-forras felulirhato teszteleshez.",
+            "notes_en": "The release tarball source can be overridden for testing."
+        },
         {
             "version": "1.0.12",
             "codename": "Duna",
@@ -290,6 +312,6 @@
             "notes_en": "Baseline release: version display, update checking, database migration framework."
         }
     ],
-    "latest": "1.0.12",
-    "generated_at": "2026-08-26T15:11:52Z"
+    "latest": "1.0.13",
+    "generated_at": "2026-08-26T21:49:00Z"
 }
