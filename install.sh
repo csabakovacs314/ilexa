@@ -409,6 +409,12 @@ _set() { # key value
 _set MAIL_FQDN "$FQDN"; _set PRIMARY_DOMAIN "$DOMAIN"
 _set ADMIN_EMAIL "$EMAIL"; _set ALERT_EMAIL "$EMAIL"
 _set TLS_MODE "$TLS"
+# The base file is the CI profile, and CI pins TIMEZONE=UTC for determinism.
+# A real host must NOT inherit that: blanking it here lets deploy.sh fill in
+# whatever the box is already set to, so the one-liner never silently moves
+# the clock. (The same bug was already fixed in answers.example.conf; this
+# entry point takes its answers from the CI file instead and kept it alive.)
+_set TIMEZONE ""
 # webroot, not standalone: 50-web has already started the web server by the time
 # 75-tls-dns runs, so --standalone cannot bind :80 on a fresh install.
 [ "$TLS" = letsencrypt ] && _set CERTBOT_METHOD webroot
