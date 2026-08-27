@@ -20,11 +20,18 @@
 # knows where focus is. Exported once here so every whiptail call inherits it.
 # Colour names are newt's 16-colour set (no truecolor); this stays readable on
 # a plain 16-colour TTY as well as a modern terminal.
+# compactbutton is deliberately ABSENT. whiptail draws yes/no buttons as
+# COMPACT buttons, and that key has no active/inactive variant -- setting it
+# painted the focused and unfocused button identically, which is exactly the
+# "selector is still invisible" that was reported against the first attempt.
+# Verified by decoding the terminal's own SGR state at each button: with the
+# key set both were lightgray-on-blue; without it the focused one is
+# black-on-lightgray, i.e. the grey selector block, against white-on-blue.
 export NEWT_COLORS='
 root=,black
 shadow=,black
 window=,blue
-border=lightgray,blue
+border=white,blue
 title=white,blue
 textbox=white,blue
 label=white,blue
@@ -32,9 +39,8 @@ emptyscale=,blue
 fullscale=,lightgray
 helpline=white,blue
 roottext=lightgray,black
-button=lightgray,blue
+button=white,blue
 actbutton=black,lightgray
-compactbutton=lightgray,blue
 entry=black,lightgray
 disentry=gray,blue
 checkbox=white,blue
@@ -77,7 +83,12 @@ tui_welcome() { # purpose_text
     # convention, so the first thing an operator saw looked nothing like the
     # rest of the wizard -- reported from a live run as not looking correct.
     # A yesno states the two real choices as labelled buttons instead.
-    local lines maxh h scroll=() text="$1"
+    # The welcome screen needs the key help too -- it calls whiptail directly
+    # rather than through tui_yesno, so it did not inherit the nav line and was
+    # reported as giving no hint how to move from Begin to Exit.
+    local lines maxh h scroll=() text="$1
+
+$MD_TUI_NAV_YESNO"
     lines=$(printf '%s\n' "$text" | wc -l)
     maxh=$(tput lines 2>/dev/null || echo 24); maxh=$((maxh - 2))
     h=$((lines + 8))
