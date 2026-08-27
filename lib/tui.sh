@@ -107,12 +107,16 @@ tui_welcome() { # purpose_text
     # The welcome screen needs the key help too -- it calls whiptail directly
     # rather than through tui_yesno, so it did not inherit the nav line and was
     # reported as giving no hint how to move from Begin to Exit.
-    local lines maxh h scroll=() text="$1
+    local cols w inner lines maxh h scroll=() text
+    cols=$(tput cols 2>/dev/null || echo 80)
+    w=$((cols - 6)); [ "$w" -gt 78 ] && w=78; [ "$w" -lt 50 ] && w=50
+    inner=$((w - 6))
+    text="$(printf '%s\n' "$1" | fold -s -w "$inner")
 
 $MD_TUI_NAV_YESNO"
     lines=$(printf '%s\n' "$text" | wc -l)
     maxh=$(tput lines 2>/dev/null || echo 24); maxh=$((maxh - 2))
-    h=$((lines + 8))
+    h=$((lines + 7))
     if [ "$h" -gt "$maxh" ]; then
       h=$maxh; scroll=(--scrolltext)
       text="(more below - scroll with the DOWN arrow)
@@ -123,7 +127,7 @@ $text"
     whiptail --backtitle "$MD_TUI_BACKTITLE" \
       --title "mail-deploy - ${MD_OS_LABEL} mail-server deployer" \
       "${scroll[@]}" --yes-button "Begin" --no-button "Exit" \
-      --yesno "$text" "$h" 74 && return 0
+      --yesno "$text" "$h" "$w" && return 0
     # No / Esc: the deliberate way out, and nothing has been changed yet.
     clear 2>/dev/null || true
     printf 'Exited - no changes were made.\n'
@@ -152,18 +156,30 @@ BANNER
 
 tui_msg() { # title text
   if _tui_ok; then
-    # A two-button dialog, NOT a msgbox. A msgbox has a single OK, so newt has
-    # nothing to contrast it against and it renders unhighlighted on the blue
-    # field -- reported as "the OK button is not highlighted" on the host-check
-    # screen. Two buttons also give every informational screen an explicit way
-    # out, which is what "must be able to exit anytime" needs.
-    local lines maxh h scroll=() text="$2"
+    # A two-button dialog, NOT a msgbox: a lone OK gives newt nothing to
+    # contrast against, and two buttons also give every informational screen an
+    # explicit way out.
+    #
+    # The text is re-wrapped to the box's INNER width before display. Screens
+    # were authored hard-wrapped at ~78 columns while the box is narrower, so
+    # whiptail re-wrapped them itself and every long line came out with a short
+    # orphan under it -- reported as text overflowing the border with improper
+    # line breaks. fold -s only touches lines that are too long, so deliberate
+    # short lines and blank lines survive.
+    local cols w inner lines maxh h scroll=() text
+    cols=$(tput cols 2>/dev/null || echo 80)
+    w=$((cols - 6)); [ "$w" -gt 78 ] && w=78; [ "$w" -lt 50 ] && w=50
+    inner=$((w - 6))
+    text=$(printf '%s\n' "$2" | fold -s -w "$inner")
     lines=$(printf '%s\n' "$text" | wc -l)
     maxh=$(tput lines 2>/dev/null || echo 24); maxh=$((maxh - 2))
-    h=$((lines + 8))
+    h=$((lines + 7))
     if [ "$h" -gt "$maxh" ]; then
+      # Scrolling puts focus on the TEXT, not on a button, so no button looks
+      # active until the reader tabs to one. Say so, rather than leaving them
+      # wondering which control is live.
       h=$maxh; scroll=(--scrolltext)
-      text="(more below - scroll with the DOWN arrow)
+      text="(text scrolls: UP/DOWN reads it, TAB moves to the buttons)
 
 $text"
     fi
@@ -172,7 +188,7 @@ $text"
       --yes-button "Continue" --no-button "Exit" \
       --yesno "$text
 
-$MD_TUI_NAV_YESNO" "$h" 74 && return 0
+$MD_TUI_NAV_YESNO" "$h" "$w" && return 0
     md_abort            # Exit button or Esc: nothing has been changed yet
   else printf '%s: %s\n' "$1" "$2" >&2; fi
 }
@@ -200,7 +216,7 @@ $MD_TUI_NAV_YESNO" "$h" 74 && return 0
 
 MD_TUI_NAV_MENU='Up/Down chooses an item.  TAB jumps to the buttons, then Left/Right moves between them.  Enter presses the button with the GREY highlight.  Esc = quit.'
 MD_TUI_NAV_ENTRY='Type the value, then TAB to the buttons (Left/Right moves between them).  Enter presses the button with the GREY highlight.  Esc = quit.'
-MD_TUI_NAV_YESNO='Left/Right or TAB moves between the buttons.  Enter presses the button with the GREY highlight.  Esc = quit.'
+MD_TUI_NAV_YESNO='Arrows/TAB move.  Enter presses the GREY button.  Esc = quit.'
 
 tui_menu() { # title prompt default_tag  tag1 desc1 [tag2 desc2 ...]
   # A real selection list where a choice exists -- reported from a live wizard
@@ -250,7 +266,11 @@ tui_password() { # prompt   (exit status 1/255 = user chose Exit/Esc)
 tui_yesno() { # prompt  -> returns 0 for yes, 1 for no
   local prompt="$1"
   if _tui_ok; then
-    local lines h maxh
+    local cols w inner lines h maxh
+    cols=$(tput cols 2>/dev/null || echo 80)
+    w=$((cols - 6)); [ "$w" -gt 78 ] && w=78; [ "$w" -lt 50 ] && w=50
+    inner=$((w - 6))
+    prompt=$(printf '%s\n' "$prompt" | fold -s -w "$inner")
     lines=$(printf '%s\n' "$prompt" | wc -l); h=$((lines + 9))
     maxh=$(tput lines 2>/dev/null || echo 24)
     [ "$h" -gt $((maxh - 2)) ] && h=$((maxh - 2))
@@ -259,7 +279,7 @@ tui_yesno() { # prompt  -> returns 0 for yes, 1 for no
     while true; do
       whiptail --backtitle "$MD_TUI_BACKTITLE" --yesno "$prompt
 
-$MD_TUI_NAV_YESNO" "$h" 74
+$MD_TUI_NAV_YESNO" "$h" "$w"
       rc=$?
       [ "$rc" = 0 ] && return 0          # Yes
       [ "$rc" = 1 ] && return 1          # a deliberate No -- NOT a quit

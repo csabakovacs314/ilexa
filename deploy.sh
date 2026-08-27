@@ -26,22 +26,19 @@ declare -a ONLY=()
 # named here on purpose -- tui_welcome's own title line already shows the
 # real detected OS (main()'s early os_detect call sets MD_OS_LABEL), so
 # naming one here too would risk contradicting it.
-MD_PURPOSE="  This tool stands up a complete, hardened mail server on a FRESH,
-  supported host — reproducing a production-grade reference
-  stack from parameterized templates (no live secrets are copied):
+MD_PURPOSE="  Stands up a complete, hardened mail server on a FRESH host
+  from parameterized templates (no live secrets are copied):
 
-    • Postfix (virtual domains via MySQL) + postscreen DNSBLs
-    • Dovecot IMAP/POP3 (SQL auth, Maildir, optional full-text search)
-    • rspamd + ClamAV, OpenDKIM / DMARC / SPF
-    • PostfixAdmin, Roundcube webmail, and the ilexa console
-    • Fail2Ban, firewalld geoblock, and the AlienVault OTX suite
-    • Secure-by-default hardening (SSH key-only, backups, auto-reboot)
+    * Postfix + Dovecot IMAP/POP3, rspamd + ClamAV
+    * OpenDKIM / DMARC / SPF, postscreen DNSBLs
+    * PostfixAdmin, Roundcube webmail, the ilexa console
+    * Fail2Ban, firewalld geoblock, SSH key-only hardening
 
-  It asks a short series of questions, shows a review screen, and only
-  THEN changes anything. Existing files are backed up before overwrite.
+  Questions first, then a review screen; only THEN are changes
+  made, and existing files are backed up first.
 
-  WARNING: run this on a fresh host — modules overwrite /etc/postfix,
-  /etc/dovecot, databases, etc. with templated defaults."
+  WARNING: fresh hosts only -- overwrites /etc/postfix,
+  /etc/dovecot and databases with templated defaults."
 
 usage() { sed -n '2,12p' "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//'; }
 
@@ -287,35 +284,21 @@ collect_interactive() {
   # (focused by definition), and the yesno that follows is short enough
   # that its Yes/No buttons render normally.
   tui_msg "DEPLOYMENT TYPE: the central mail archive" \
-"WITH ARCHIVE (Postfix always_bcc copies every message to one mailbox)
-WITHOUT ARCHIVE (filtering only; nothing is retained centrally)
+"WITH ARCHIVE     every message is copied to one mailbox.
+WITHOUT ARCHIVE  filtering only; nothing retained centrally.
 
-WHY THE ARCHIVE EXISTS -- it is not 'keep everything just in case':
+There is NO quarantine: suspect mail is tagged and DELIVERED,
+and POP3 clients delete mail from the server -- so the archive
+is the only place a false positive can be recovered from. The
+Archive tab, its search, the spam/ham training buttons and the
+weekly digest all read from it.
 
- * POP3 clients DELETE mail from the server after download. Once a user has
-   collected their mail there is no server-side copy left, so a message that
-   was mis-filed can never be examined, recovered or learned from. IMAP users
-   who empty folders create the same hole.
- * Users do not reliably report spam. The spam@ / ham@ addresses only work for
-   people who bother to forward things, so without an archive the filter's
-   training corpus is whatever a handful of users happened to send.
- * This system has NO quarantine. Suspect mail is tagged and DELIVERED (that
-   is deliberate -- see the spam model), so the archive is the only place a
-   false positive can be retrieved from. The same applies to messages held
-   back by attachment or virus scoring.
- * It is what the Archive tab, the search, the spam/ham training buttons and
-   the weekly digest all read from. Without it those features have no data.
+Without it, filtering is unchanged; you lose recovery, search
+and most of the training signal.
 
-WITHOUT the archive, filtering still works exactly the same. What you lose is
-recovery, retrospective search, and most of the training signal.
-
-GDPR / privacy: this copies the CONTENT of everyone's mail -- inbound and
-outbound, personal and business -- into one mailbox administrators can read.
-In most jurisdictions that is personal-data processing which needs a lawful
-basis, a retention period and users informed in advance. Retention is asked
-for next and enforced automatically. The console additionally has a
-content-viewing policy (Rendszer -> adatvedelem) which can restrict or forbid
-reading message bodies even for administrators; it defaults to DENY."
+GDPR: it copies the CONTENT of everyone's mail into one mailbox
+admins can read. That needs a lawful basis, a retention period
+(asked next) and users told in advance."
   if tui_yesno "Enable the central mail archive?
 
 (The previous screen explains what this means, including the GDPR side.)"; then
