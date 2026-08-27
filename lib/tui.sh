@@ -20,6 +20,14 @@
 # knows where focus is. Exported once here so every whiptail call inherits it.
 # Colour names are newt's 16-colour set (no truecolor); this stays readable on
 # a plain 16-colour TTY as well as a modern terminal.
+# The FOCUSED element is the BRIGHTEST one (black on white), never a grey
+# block. Grey reads as "disabled" by long convention, so a grey selector made
+# the unfocused, brighter button look like the selected one -- which is why
+# moving focus right was reported as the arrows working "in the opposite
+# direction". Measured first: the arrows themselves are correct (RIGHT moves
+# right, TAB then RIGHT reaches Cancel), so the problem was which button LOOKED
+# selected, not which one was.
+#
 # compactbutton is deliberately ABSENT. whiptail draws yes/no buttons as
 # COMPACT buttons, and that key has no active/inactive variant -- setting it
 # painted the focused and unfocused button identically, which is exactly the
@@ -177,9 +185,9 @@ $MD_TUI_NAV_YESNO" "$h" 74 && return 0
 # exit would leave the installer running with an empty value), so they return
 # 1 and rely on the caller's `|| md_abort` -- present on all 16 call sites.
 
-MD_TUI_NAV_MENU='Up/Down = choose   TAB = jump to the buttons   Enter = confirm   Esc = quit'
-MD_TUI_NAV_ENTRY='TAB = jump to the buttons   Enter = confirm   Esc = quit'
-MD_TUI_NAV_YESNO='Left/Right or TAB = switch buttons   Enter = confirm   Esc = quit'
+MD_TUI_NAV_MENU='Up/Down chooses an item.  TAB jumps to the buttons, then Left/Right moves between them.  Enter presses the HIGHLIGHTED button.  Esc = quit.'
+MD_TUI_NAV_ENTRY='Type the value, then TAB to the buttons (Left/Right moves between them).  Enter presses the HIGHLIGHTED button.  Esc = quit.'
+MD_TUI_NAV_YESNO='Left/Right or TAB moves between the buttons.  Enter presses the HIGHLIGHTED button (the one with the light background).  Esc = quit.'
 
 tui_menu() { # title prompt default_tag  tag1 desc1 [tag2 desc2 ...]
   # A real selection list where a choice exists -- reported from a live wizard
