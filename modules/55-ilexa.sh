@@ -488,6 +488,17 @@ if [ "$PKG_MGR" = apt ]; then pkg_install mmdb-bin; else pkg_install libmaxmindd
 # happened to have the package pulled in by something else. Same package on
 # both families.
 pkg_install sqlite3
+
+# jq, for the same reason: a console feature depends on it and nothing was
+# making sure it existed. qa-ioc-lookup.sh parses every reputation API's
+# response with jq, but the only pkg_install jq in the tree is in 70-otx.sh --
+# which exits three lines EARLIER when ENABLE_OTX=no, the default in the
+# acceptance profile. On the box this was found on, jq was present purely as a
+# transitive dependency of fwupd and prometheus-node-exporter-collectors
+# (apt-mark showmanual does not list it), so every IOC reputation lookup was one
+# unrelated package removal away from failing. Install it where the feature that
+# needs it is installed.
+pkg_install jq
 if [ "$DRY_RUN" != 1 ] && [ ! -e /usr/share/GeoIP/GeoLite2-Country.mmdb ]; then
   /usr/local/sbin/qa-geoipdb-refresh.sh \
     && log_info "GeoIP country database installed (db-ip lite)" \
