@@ -1,8 +1,30 @@
 {
     "schema": 1,
-    "serial": 15,
+    "serial": 16,
     "channel": "stable",
     "releases": [
+        {
+            "version": "1.0.15",
+            "codename": "Duna",
+            "tag": "v1.0.15",
+            "released_at": "2026-08-27",
+            "commit": "eb6d5e4",
+            "severity": "fix",
+            "requires_installer": false,
+            "min_upgrade_from": "0.0.0",
+            "schema_version": {
+                "mysql": 1,
+                "iocs": 2,
+                "logins": 3
+            },
+            "app_tarball": {
+                "path": "assets/ilexa-app.tar.gz",
+                "sha256": "a43e3c0b516590e722f610ff87e1c5e4ec6acba971ee6d3dd7b9b19d0fe119a8",
+                "size": 1901903
+            },
+            "notes_hu": "A hirnev-lekerdezo segedprogram PHP valtozata is telepul.",
+            "notes_en": "Ships a PHP implementation of the reputation-lookup helper; the shell one still runs."
+        },
         {
             "version": "1.0.14",
             "codename": "Duna",
@@ -334,6 +356,6 @@
             "notes_en": "Baseline release: version display, update checking, database migration framework."
         }
     ],
-    "latest": "1.0.14",
-    "generated_at": "2026-08-27T07:32:39Z"
+    "latest": "1.0.15",
+    "generated_at": "2026-08-27T08:29:36Z"
 }
