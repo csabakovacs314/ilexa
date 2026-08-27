@@ -58,16 +58,16 @@ emptyscale=,blue
 fullscale=,lightgray
 helpline=white,blue
 roottext=lightgray,black
-button=white,blue
-actbutton=white,black
+button=lightgray,blue
+actbutton=black,lightgray
 entry=black,lightgray
 disentry=gray,blue
 checkbox=white,blue
-actcheckbox=white,black
+actcheckbox=black,lightgray
 listbox=white,blue
-actlistbox=white,black
-sellistbox=white,black
-actsellistbox=white,black
+actlistbox=black,lightgray
+sellistbox=black,lightgray
+actsellistbox=black,lightgray
 }"
 export NEWT_COLORS
 
@@ -197,9 +197,9 @@ $MD_TUI_NAV_YESNO" "$h" 74 && return 0
 # exit would leave the installer running with an empty value), so they return
 # 1 and rely on the caller's `|| md_abort` -- present on all 16 call sites.
 
-MD_TUI_NAV_MENU='Up/Down chooses an item.  TAB jumps to the buttons, then Left/Right moves between them.  Enter presses the button with the DARK highlight.  Esc = quit.'
-MD_TUI_NAV_ENTRY='Type the value, then TAB to the buttons (Left/Right moves between them).  Enter presses the button with the DARK highlight.  Esc = quit.'
-MD_TUI_NAV_YESNO='Left/Right or TAB moves between the buttons.  Enter presses the button with the DARK highlight.  Esc = quit.'
+MD_TUI_NAV_MENU='Up/Down chooses an item.  TAB jumps to the buttons, then Left/Right moves between them.  Enter presses the button with the GREY highlight.  Esc = quit.'
+MD_TUI_NAV_ENTRY='Type the value, then TAB to the buttons (Left/Right moves between them).  Enter presses the button with the GREY highlight.  Esc = quit.'
+MD_TUI_NAV_YESNO='Left/Right or TAB moves between the buttons.  Enter presses the button with the GREY highlight.  Esc = quit.'
 
 tui_menu() { # title prompt default_tag  tag1 desc1 [tag2 desc2 ...]
   # A real selection list where a choice exists -- reported from a live wizard
