@@ -20,13 +20,21 @@
 # knows where focus is. Exported once here so every whiptail call inherits it.
 # Colour names are newt's 16-colour set (no truecolor); this stays readable on
 # a plain 16-colour TTY as well as a modern terminal.
-# The FOCUSED element is the BRIGHTEST one (black on white), never a grey
-# block. Grey reads as "disabled" by long convention, so a grey selector made
-# the unfocused, brighter button look like the selected one -- which is why
-# moving focus right was reported as the arrows working "in the opposite
-# direction". Measured first: the arrows themselves are correct (RIGHT moves
-# right, TAB then RIGHT reaches Cancel), so the problem was which button LOOKED
-# selected, not which one was.
+# The FOCUSED element is a DARK block (white on black); everything unfocused is
+# a grey button. This is the second attempt and it was settled by the operator
+# looking at a real terminal, not by theory: a light-grey block reads as
+# "disabled" by long convention, so when focus WAS the grey one the wrong
+# button appeared chosen -- moving right looked like the arrows going left, and
+# Enter on what looked like Exit pressed Continue instead.
+#
+# Brightness could not resolve it: newt backgrounds are the eight base colours,
+# where "white" and "lightgray" are the SAME value, so the focused block could
+# not be made lighter than the grey it already was. Going dark is the only
+# direction with contrast left, and black was in the requested palette.
+#
+# Measured before and after: the arrow keys and the Exit path were always
+# correct (RIGHT moves right; the real md_abort exits cleanly) -- the defect was
+# only ever which button LOOKED selected.
 #
 # compactbutton is deliberately ABSENT. whiptail draws yes/no buttons as
 # COMPACT buttons, and that key has no active/inactive variant -- setting it
@@ -35,7 +43,10 @@
 # Verified by decoding the terminal's own SGR state at each button: with the
 # key set both were lightgray-on-blue; without it the focused one is
 # black-on-lightgray, i.e. the grey selector block, against white-on-blue.
-export NEWT_COLORS='
+# Set NEWT_COLORS in the environment to override this entirely, e.g.
+#   NEWT_COLORS='actbutton=black,red' bash deploy.sh
+# so a palette can be tried on the real terminal without editing this file.
+: "${NEWT_COLORS:=
 root=,black
 shadow=,black
 window=,blue
@@ -48,16 +59,17 @@ fullscale=,lightgray
 helpline=white,blue
 roottext=lightgray,black
 button=white,blue
-actbutton=black,lightgray
+actbutton=white,black
 entry=black,lightgray
 disentry=gray,blue
 checkbox=white,blue
-actcheckbox=black,lightgray
+actcheckbox=white,black
 listbox=white,blue
-actlistbox=black,lightgray
-sellistbox=black,lightgray
-actsellistbox=black,lightgray
-'
+actlistbox=white,black
+sellistbox=white,black
+actsellistbox=white,black
+}"
+export NEWT_COLORS
 
 : "${MD_OS_LABEL:=this host}"
 # stdout is deliberately NOT required to be a terminal here. Every
@@ -185,9 +197,9 @@ $MD_TUI_NAV_YESNO" "$h" 74 && return 0
 # exit would leave the installer running with an empty value), so they return
 # 1 and rely on the caller's `|| md_abort` -- present on all 16 call sites.
 
-MD_TUI_NAV_MENU='Up/Down chooses an item.  TAB jumps to the buttons, then Left/Right moves between them.  Enter presses the HIGHLIGHTED button.  Esc = quit.'
-MD_TUI_NAV_ENTRY='Type the value, then TAB to the buttons (Left/Right moves between them).  Enter presses the HIGHLIGHTED button.  Esc = quit.'
-MD_TUI_NAV_YESNO='Left/Right or TAB moves between the buttons.  Enter presses the HIGHLIGHTED button (the one with the light background).  Esc = quit.'
+MD_TUI_NAV_MENU='Up/Down chooses an item.  TAB jumps to the buttons, then Left/Right moves between them.  Enter presses the button with the DARK highlight.  Esc = quit.'
+MD_TUI_NAV_ENTRY='Type the value, then TAB to the buttons (Left/Right moves between them).  Enter presses the button with the DARK highlight.  Esc = quit.'
+MD_TUI_NAV_YESNO='Left/Right or TAB moves between the buttons.  Enter presses the button with the DARK highlight.  Esc = quit.'
 
 tui_menu() { # title prompt default_tag  tag1 desc1 [tag2 desc2 ...]
   # A real selection list where a choice exists -- reported from a live wizard
