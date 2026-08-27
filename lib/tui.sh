@@ -131,31 +131,28 @@ BANNER
 
 tui_msg() { # title text
   if _tui_ok; then
-    # Size the box to the text instead of clipping at a fixed 12 rows: long
-    # explainers (the deployment-type screen is ~34 lines) otherwise render
-    # scroll-mangled. Cap at the real terminal height; past the cap, add
-    # --scrolltext — a msgbox has only the OK button, so focus stays on OK
-    # either way and arrow keys scroll the text.
-    local lines maxh h scroll=()
-    lines=$(printf '%s\n' "$2" | wc -l)
+    # A two-button dialog, NOT a msgbox. A msgbox has a single OK, so newt has
+    # nothing to contrast it against and it renders unhighlighted on the blue
+    # field -- reported as "the OK button is not highlighted" on the host-check
+    # screen. Two buttons also give every informational screen an explicit way
+    # out, which is what "must be able to exit anytime" needs.
+    local lines maxh h scroll=() text="$2"
+    lines=$(printf '%s\n' "$text" | wc -l)
     maxh=$(tput lines 2>/dev/null || echo 24); maxh=$((maxh - 2))
-    h=$((lines + 6))
-    local text="$2"
+    h=$((lines + 8))
     if [ "$h" -gt "$maxh" ]; then
       h=$maxh; scroll=(--scrolltext)
-      # whiptail gives NO visual cue that a msgbox scrolls -- the text just
-      # stops at the box edge and reads as complete. Say so, on the first
-      # visible line, together with how to leave: reported from a live wizard
-      # run as "no sign the text continues, and no hint how to reach OK".
-      text="(more below - scroll with the DOWN arrow; Enter = OK at any time)
+      text="(more below - scroll with the DOWN arrow)
 
 $text"
     fi
     [ "$h" -lt 12 ] && h=12
-    while true; do
-      whiptail --backtitle "$MD_TUI_BACKTITLE" --title "$1" "${scroll[@]}" --msgbox "$text" "$h" 74 && return 0
-      _tui_confirm_quit && md_abort      # Esc: confirm, else show it again
-    done
+    whiptail --backtitle "$MD_TUI_BACKTITLE" --title "$1" "${scroll[@]}" \
+      --yes-button "Continue" --no-button "Exit" \
+      --yesno "$text
+
+$MD_TUI_NAV_YESNO" "$h" 74 && return 0
+    md_abort            # Exit button or Esc: nothing has been changed yet
   else printf '%s: %s\n' "$1" "$2" >&2; fi
 }
 
@@ -164,24 +161,21 @@ $text"
 # Exit buttons". The backtitle also used to advertise Ctrl+X, which whiptail
 # has NO binding for -- it only ever worked on the old raw-text banner, so it
 # was a promise the wizard could not keep. These are the keys that work.
-# ONE WAY OUT, ON EVERY SCREEN. Esc used to be silently destructive on a
-# yes/no: whiptail returns 255 for Esc, and `if tui_yesno ...; then A; else B;
-# fi` ran B -- so a user pressing Esc to quit ANSWERED THE QUESTION "no" and
-# the wizard carried on. Now Esc (and the Exit/Cancel button, where one exists)
-# always asks, and a confirmed quit leaves without touching the host: nothing
-# is modified before the review screen, so exiting here is always clean.
+# ONE WAY OUT, ON EVERY SCREEN, AND IT IS IMMEDIATE. Esc quits; the Exit
+# button quits; nothing is modified before the review screen, so leaving is
+# always clean and needs no confirmation.
 #
-# The value-returning wrappers run inside $( ), i.e. a SUBSHELL -- `exit` there
-# would kill only the subshell and let the installer carry on with an empty
-# value. They return 1 instead and rely on the caller's `|| md_abort`, which
-# every one of them has.
-_tui_confirm_quit() { # 0 = user really wants out
-  whiptail --backtitle "$MD_TUI_BACKTITLE" --title "Quit the installer?" \
-    --yes-button "Quit" --no-button "Stay" \
-    --yesno "Leave the installer now?
-
-Nothing has been changed on this host yet." 11 64
-}
+# There WAS a confirmation dialog here. It was worse than useless: whiptail
+# draws its interface on STDOUT, and the value-returning wrappers run inside
+# $( ), where stdout is a pipe -- so from a menu or an input prompt the
+# confirmation was drawn into the pipe and never appeared on screen. The user
+# was answering a dialog they could not see, which is exactly how "I pressed
+# Esc and had to click Stay to exit" happens. Removing it removes the whole
+# bug class.
+#
+# The value-returning wrappers still cannot call exit themselves (a subshell
+# exit would leave the installer running with an empty value), so they return
+# 1 and rely on the caller's `|| md_abort` -- present on all 16 call sites.
 
 MD_TUI_NAV_MENU='Up/Down = choose   TAB = jump to the buttons   Enter = confirm   Esc = quit'
 MD_TUI_NAV_ENTRY='TAB = jump to the buttons   Enter = confirm   Esc = quit'
@@ -196,15 +190,15 @@ tui_menu() { # title prompt default_tag  tag1 desc1 [tag2 desc2 ...]
   if _tui_ok; then
     local n=$(( $# / 2 )); local h=$(( n + 12 )); [ "$h" -gt 22 ] && h=22
     local val
-    while true; do
+    {
       if val=$(whiptail --backtitle "$MD_TUI_BACKTITLE" --title "$title" \
         --default-item "$def" --menu "$prompt
 
 $MD_TUI_NAV_MENU" "$h" 74 "$n" "$@" 3>&1 1>&2 2>&3); then
         printf '%s' "$val"; return 0
       fi
-      _tui_confirm_quit && return 1
-    done
+      return 1        # Cancel/Exit/Esc -> caller runs md_abort
+    }
   else printf '%s' "$def"; fi
 }
 
@@ -212,15 +206,15 @@ tui_input() { # prompt default   (exit status 1/255 = user chose Exit/Esc)
   local prompt="$1" def="${2:-}"
   if _tui_ok; then
     local val
-    while true; do
+    {
       if val=$(whiptail --backtitle "$MD_TUI_BACKTITLE" --cancel-button "Exit" \
         --inputbox "$prompt
 
 $MD_TUI_NAV_ENTRY" 12 74 "$def" 3>&1 1>&2 2>&3); then
         printf '%s' "$val"; return 0
       fi
-      _tui_confirm_quit && return 1
-    done
+      return 1        # Cancel/Exit/Esc -> caller runs md_abort
+    }
   else printf '%s' "$def"; fi
 }
 
@@ -248,7 +242,7 @@ $MD_TUI_NAV_YESNO" "$h" 74
       rc=$?
       [ "$rc" = 0 ] && return 0          # Yes
       [ "$rc" = 1 ] && return 1          # a deliberate No -- NOT a quit
-      _tui_confirm_quit && md_abort      # 255 = Esc
+      md_abort                           # 255 = Esc
     done
   else return 0; fi
 }
