@@ -107,7 +107,26 @@ $entry = [
     "notes_hu" => $notesHu, "notes_en" => $notesEn,
 ];
 array_unshift($m["releases"], $entry);
-$m["serial"] = (int)($m["serial"] ?? 0) + 1;
+// THE SERIAL IS AN ANTI-ROLLBACK FLOOR, AND HOSTS REMEMBER IT. qa-update-check
+// caches the highest serial it has ever verified and refuses anything lower --
+// so the +1 must be computed over every serial that was ever PUBLISHED, not
+// just the one in this repo. The two drifted once (hotfix manifests were
+// published straight from the public clone), this script incremented the stale
+// copy, and every host on the fleet silently refused the release as a
+// rollback: the update tile just said ERR_SERIAL while the cut looked clean
+// from here. The public clone is what hosts actually fetch, so its serial is
+// the floor.
+$floor = (int)($m["serial"] ?? 0);
+$pub = $argv[13] . "/RELEASES.json";
+if (is_file($pub)) {
+    $pm = json_decode(file_get_contents($pub), true);
+    $pubSerial = is_array($pm) ? (int)($pm["serial"] ?? 0) : 0;
+    if ($pubSerial > $floor) {
+        fwrite(STDERR, "release.sh: WARNING: public manifest serial ($pubSerial) is ahead of the local one ($floor) -- manifests drifted; using the public serial as the floor\n");
+        $floor = $pubSerial;
+    }
+}
+$m["serial"] = $floor + 1;
 $m["latest"] = $version;
 $m["generated_at"] = gmdate("Y-m-d\TH:i:s\Z");
 $m["channel"] = $m["channel"] ?? "stable";
@@ -116,7 +135,7 @@ $m["schema"] = $m["schema"] ?? 1;
 file_put_contents($manifestPath, json_encode($m, JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES) . "\n");
 echo "release.sh: manifest serial now " . $m["serial"] . ", latest=$version\n";
 ' "$MANIFEST" "$version" "$codename" "$commit" "$sha256" "$size" "$severity" \
-  "$requires_installer" "$min_upgrade_from" "$notes_hu" "$notes_en" "$schema_json"
+  "$requires_installer" "$min_upgrade_from" "$notes_hu" "$notes_en" "$schema_json" "$PUBLIC_DIR"
 
 echo "release.sh: signing manifest ..."
 openssl pkeyutl -sign -inkey "$KEY" -rawin -in "$MANIFEST" -out "$MANIFEST.sig"

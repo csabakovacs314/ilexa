@@ -303,6 +303,23 @@ reading message bodies even for administrators; it defaults to DENY."
     ENABLE_ARCHIVE=yes
     ARCHIVE_RETENTION_DAYS=$(tui_input "Keep archived mail for how many days?" "30") || md_abort
   else ENABLE_ARCHIVE=no; fi
+  # Greylisting: a wizard QUESTION, not just an apply_defaults default. It is
+  # the one filtering layer with a user-visible cost -- an unknown sender's
+  # first message is delayed ~5 minutes -- so an operator serving people who
+  # expect instant password-reset and 2FA mail must be able to decline it here
+  # without editing an answers file they are not using. Yes is whiptail's
+  # default button, matching apply_defaults' ENABLE_GREYLISTING:=yes.
+  if tui_yesno "Enable greylisting (postgrey)?
+
+  Defers an UNKNOWN sender's first message for ~5 minutes; legitimate servers
+  retry and get through, while much throwaway spam never comes back. The cost
+  is a one-time delay on the FIRST mail from each new correspondent -- which
+  falls hardest on password resets and 2FA codes from senders not seen before.
+
+  (Yes suits most sites. No if any delay is unacceptable. Switchable later only
+  by re-running the installer.)"; then
+    ENABLE_GREYLISTING=yes
+  else ENABLE_GREYLISTING=no; fi
   # Default system language -- Roundcube, ilexa AND PostfixAdmin all follow it.
   # English default; Yes is whiptail's default button, so plain Enter accepts
   # English. Changeable any time from the console (Admin -> language), which
