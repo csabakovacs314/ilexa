@@ -1,8 +1,30 @@
 {
     "schema": 1,
-    "serial": 16,
+    "serial": 17,
     "channel": "stable",
     "releases": [
+        {
+            "version": "1.0.16",
+            "codename": "Duna",
+            "tag": "v1.0.16",
+            "released_at": "2026-08-27",
+            "commit": "f8ae374",
+            "severity": "fix",
+            "requires_installer": false,
+            "min_upgrade_from": "0.0.0",
+            "schema_version": {
+                "mysql": 1,
+                "iocs": 2,
+                "logins": 3
+            },
+            "app_tarball": {
+                "path": "assets/ilexa-app.tar.gz",
+                "sha256": "1032722f632b882ba53a9b2fd38957862cba49470c665d79d36e42e1becb277d",
+                "size": 1896339
+            },
+            "notes_hu": "A hirnev-lekerdezesek mostantol a PHP segedprogramon futnak.",
+            "notes_en": "Reputation lookups now run on the PHP helper instead of the shell one."
+        },
         {
             "version": "1.0.15",
             "codename": "Duna",
@@ -356,6 +378,6 @@
             "notes_en": "Baseline release: version display, update checking, database migration framework."
         }
     ],
-    "latest": "1.0.15",
-    "generated_at": "2026-08-27T08:29:36Z"
+    "latest": "1.0.16",
+    "generated_at": "2026-08-27T08:50:21Z"
 }
