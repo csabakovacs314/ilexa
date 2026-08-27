@@ -12,6 +12,38 @@
 # practice these generic strings are only ever seen if that call was
 # somehow skipped.
 : "${MD_TUI_BACKTITLE:=mail-deploy — mail-server deployer  (Exit: Ctrl+X)}"
+
+# A calm, professional palette. whiptail's stock theme is the red/blue newt
+# default -- reported from a live run as "ridiculous". NEWT_COLORS restyles
+# every widget: slate-blue chrome, white on blue title bars, a black working
+# area, and a single accent colour on the active button/selection so the eye
+# knows where focus is. Exported once here so every whiptail call inherits it.
+# Colour names are newt's 16-colour set (no truecolor); this stays readable on
+# a plain 16-colour TTY as well as a modern terminal.
+export NEWT_COLORS='
+root=,black
+window=,lightgray
+border=blue,lightgray
+title=blue,lightgray
+textbox=black,lightgray
+label=black,lightgray
+actbutton=white,blue
+button=black,lightgray
+compactbutton=black,lightgray
+checkbox=black,lightgray
+actcheckbox=white,blue
+entry=black,lightgray
+disentry=gray,lightgray
+listbox=black,lightgray
+actlistbox=white,blue
+sellistbox=white,blue
+actsellistbox=white,blue
+emptyscale=,gray
+fullscale=,blue
+helpline=white,blue
+roottext=lightgray,black
+'
+
 : "${MD_OS_LABEL:=this host}"
 # stdout is deliberately NOT required to be a terminal here. Every
 # value-returning wrapper below is invoked as FOO=$(tui_input ...), and
@@ -80,10 +112,32 @@ tui_msg() { # title text
     lines=$(printf '%s\n' "$2" | wc -l)
     maxh=$(tput lines 2>/dev/null || echo 24); maxh=$((maxh - 2))
     h=$((lines + 6))
-    if [ "$h" -gt "$maxh" ]; then h=$maxh; scroll=(--scrolltext); fi
+    local text="$2"
+    if [ "$h" -gt "$maxh" ]; then
+      h=$maxh; scroll=(--scrolltext)
+      # whiptail gives NO visual cue that a msgbox scrolls -- the text just
+      # stops at the box edge and reads as complete. Say so, on the first
+      # visible line, together with how to leave: reported from a live wizard
+      # run as "no sign the text continues, and no hint how to reach OK".
+      text="(more below - scroll with the DOWN arrow; Enter = OK at any time)
+
+$text"
+    fi
     [ "$h" -lt 12 ] && h=12
-    whiptail --backtitle "$MD_TUI_BACKTITLE" --title "$1" "${scroll[@]}" --msgbox "$2" "$h" 74
+    whiptail --backtitle "$MD_TUI_BACKTITLE" --title "$1" "${scroll[@]}" --msgbox "$text" "$h" 74
   else printf '%s: %s\n' "$1" "$2" >&2; fi
+}
+
+tui_menu() { # title prompt default_tag  tag1 desc1 [tag2 desc2 ...]
+  # A real selection list where a choice exists -- reported from a live wizard
+  # run: language and timezone were a bare yes/no and a free-text field, which
+  # neither showed what could be chosen nor how. --default-item preselects the
+  # sensible answer so plain Enter keeps it, matching every other prompt here.
+  local title="$1" prompt="$2" def="$3"; shift 3
+  if _tui_ok; then
+    local n=$(( $# / 2 )); local h=$(( n + 10 )); [ "$h" -gt 22 ] && h=22
+    whiptail --backtitle "$MD_TUI_BACKTITLE" --title "$title"       --default-item "$def" --menu "$prompt" "$h" 74 "$n" "$@" 3>&1 1>&2 2>&3
+  else printf '%s' "$def"; fi
 }
 
 tui_input() { # prompt default   (exit status 1/255 = user chose Exit/Esc)

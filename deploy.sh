@@ -221,8 +221,27 @@ collect_interactive() {
   # and every time the console displays, and silently defaulting to UTC left
   # operators reading their own logs two hours out. Defaults to whatever the
   # host is already set to, so answering nothing changes nothing.
-  TIMEZONE=$(tui_input "System timezone (IANA name, e.g. Europe/Budapest):" \
-                       "$(timedatectl show -p Timezone --value 2>/dev/null || echo UTC)") || md_abort
+  # Timezone: a menu of common zones plus "Other...", not a bare free-text
+  # field -- reported from a live run as offering nothing selectable. The
+  # host's CURRENT zone is preselected (plain Enter keeps it) and prepended so
+  # it is always an option even when it is not in the common list; "Other..."
+  # falls back to free text for anything else.
+  _tz_host="$(timedatectl show -p Timezone --value 2>/dev/null || echo UTC)"
+  TIMEZONE=$(tui_menu "System timezone" \
+    "Drives the clock, mail-log timestamps and everything the console displays. The current host setting is preselected -- press Enter to keep it." \
+    "$_tz_host" \
+    "$_tz_host" "current host setting" \
+    Europe/Budapest "Hungary (CET/CEST)" \
+    Europe/London   "UK" \
+    Europe/Berlin   "Central Europe" \
+    America/New_York "US Eastern" \
+    America/Los_Angeles "US Pacific" \
+    UTC             "Coordinated Universal Time" \
+    __other__       "Other... (type an IANA name)") || md_abort
+  if [ "$TIMEZONE" = __other__ ]; then
+    TIMEZONE=$(tui_input "IANA timezone name (e.g. Asia/Tokyo):" "$_tz_host") || md_abort
+  fi
+  [ -n "$TIMEZONE" ] || TIMEZONE="$_tz_host"
   # Three real answers, not two. Self-signed is a lab fallback -- no client
   # accepts it -- so an operator who already holds a certificate must be able
   # to say so here rather than install, discover the browser warning, and go
@@ -325,14 +344,12 @@ reading message bodies even for administrators; it defaults to DENY."
   # English. Changeable any time from the console (Admin -> language), which
   # owns the state file afterwards; all three apps read that file at runtime,
   # so changing it there moves them together.
-  if tui_yesno "Default system language: use ENGLISH as the interface language?
-
-Applies to webmail (Roundcube), the ilexa console and PostfixAdmin.
-
-(No = Hungarian / magyar. Changeable later in the console: Admin -> language.
-Individual users can still pick their own language in Roundcube's settings.)"; then
-    SYSTEM_LANG=en
-  else SYSTEM_LANG=hu; fi
+  SYSTEM_LANG=$(tui_menu "Interface language" \
+    "Default language for webmail (Roundcube), the ilexa console and PostfixAdmin. Changeable later (Admin -> language); users can still pick their own in Roundcube." \
+    en \
+    en "English" \
+    hu "Magyar (Hungarian)") || md_abort
+  [ -n "$SYSTEM_LANG" ] || SYSTEM_LANG=en
   ILEXA_LANG=$SYSTEM_LANG
   # Password expiry: one global interval for every mailbox (PostfixAdmin's own
   # per-domain override stays superadmin-only, unchanged, in its own UI).
