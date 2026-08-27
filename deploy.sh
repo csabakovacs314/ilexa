@@ -243,9 +243,14 @@ collect_interactive() {
   # accepts it -- so an operator who already holds a certificate must be able
   # to say so here rather than install, discover the browser warning, and go
   # looking for where to put their own cert.
-  if tui_yesno "Use Let's Encrypt for TLS? (No = supply your own certificate, or a self-signed lab cert)"; then
+  if tui_yesno "Use Let's Encrypt for TLS?
+
+No = supply your own certificate, or fall back to a
+self-signed lab cert."; then
     TLS_MODE=letsencrypt
-  elif tui_yesno "Do you have your own certificate to install? (No = self-signed lab cert, browsers WILL warn)"; then
+  elif tui_yesno "Do you have your own certificate to install?
+
+No = self-signed lab cert, which browsers WILL warn about."; then
     TLS_MODE=custom
     TLS_CUSTOM_CERT=$(tui_input "Path to your certificate (PEM; server cert first, then intermediates):" "") || md_abort
     TLS_CUSTOM_KEY=$(tui_input "Path to its private key (PEM, not passphrase-protected):" "") || md_abort
@@ -265,7 +270,9 @@ collect_interactive() {
   # Reputation feeds. Every updater is installed either way; a blank key simply
   # leaves that source disabled, and it can be filled in later from the ilexa
   # Admin tab without touching the installer again.
-  if tui_yesno "Enable the reputation feeds (Spamhaus, FireHOL, URLhaus, AbuseIPDB, ...)?"; then
+  if tui_yesno "Enable the reputation feeds?
+
+Spamhaus, Abusix and others, queried live per message."; then
     ENABLE_FEEDS=yes
     ABUSECH_API_KEY=$(tui_password \
       "abuse.ch API key — URLhaus + ThreatFox/Feodo (blank = install disabled, set later in ilexa):") || md_abort
@@ -301,7 +308,8 @@ admins can read. That needs a lawful basis, a retention period
 (asked next) and users told in advance."
   if tui_yesno "Enable the central mail archive?
 
-(The previous screen explains what this means, including the GDPR side.)"; then
+The previous screen explains what this means, including
+the GDPR side."; then
     ENABLE_ARCHIVE=yes
     ARCHIVE_RETENTION_DAYS=$(tui_input "Keep archived mail for how many days?" "30") || md_abort
   else ENABLE_ARCHIVE=no; fi
@@ -313,13 +321,17 @@ admins can read. That needs a lawful basis, a retention period
   # default button, matching apply_defaults' ENABLE_GREYLISTING:=yes.
   if tui_yesno "Enable greylisting (postgrey)?
 
-  Defers an UNKNOWN sender's first message for ~5 minutes; legitimate servers
-  retry and get through, while much throwaway spam never comes back. The cost
-  is a one-time delay on the FIRST mail from each new correspondent -- which
-  falls hardest on password resets and 2FA codes from senders not seen before.
+Defers an UNKNOWN sender's first message by ~5 minutes.
+Real servers retry and get through; much throwaway spam
+never comes back.
 
-  (Yes suits most sites. No if any delay is unacceptable. Switchable later only
-  by re-running the installer.)"; then
+The cost is a one-time delay on the FIRST mail from each
+new correspondent -- felt most on password resets and 2FA
+codes from senders you have not heard from before.
+
+Yes suits most sites. Choose No if any delay is
+unacceptable. Switchable later only by re-running the
+installer."; then
     ENABLE_GREYLISTING=yes
   else ENABLE_GREYLISTING=no; fi
   # Default system language -- Roundcube, ilexa AND PostfixAdmin all follow it.
@@ -360,7 +372,7 @@ admins can read. That needs a lawful basis, a retention period
   if [ "${PKG_MGR:-dnf}" != apt ]; then
     extra_args+=(unofficial_sigs "Third-party ClamAV signature sources + YARA" on)
   fi
-  extras=$(tui_checklist "Optional extras" "${extra_args[@]}")
+  extras=$(tui_checklist "Optional extras" "${extra_args[@]}") || md_abort
   case " $extras " in *" last_login "*) ENABLE_LAST_LOGIN=yes;; *) ENABLE_LAST_LOGIN=no;; esac
   case " $extras " in *" fts_xapian "*) ENABLE_FTS_XAPIAN=yes;; *) ENABLE_FTS_XAPIAN=no;; esac
   case " $extras " in *" unattended "*) ENABLE_UNATTENDED=yes;; *) ENABLE_UNATTENDED=no;; esac
@@ -373,7 +385,7 @@ admins can read. That needs a lawful basis, a retention period
     webmin "Webmin source-IP allowlist" on \
     reboot "Kernel auto-reboot maintenance window" on \
     smtp   "SMTP tuning (50M limit, delay_reject)" on \
-    selinux "SELinux enforcing (advanced)" off)
+    selinux "SELinux enforcing (advanced)" off) || md_abort
   case " $hard " in *" ssh "*) HARDEN_SSH_KEYONLY=yes;; *) HARDEN_SSH_KEYONLY=no;; esac
   case " $hard " in *" webmin "*) HARDEN_WEBMIN=yes;; *) HARDEN_WEBMIN=no;; esac
   case " $hard " in *" reboot "*) HARDEN_KERNEL_AUTOREBOOT=yes;; *) HARDEN_KERNEL_AUTOREBOOT=no;; esac

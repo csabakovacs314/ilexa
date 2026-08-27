@@ -214,6 +214,7 @@ $MD_TUI_NAV_YESNO" "$h" "$w" && return 0
 # exit would leave the installer running with an empty value), so they return
 # 1 and rely on the caller's `|| md_abort` -- present on all 16 call sites.
 
+MD_TUI_NAV_LIST='Up/Down moves.  SPACE ticks an entry.  TAB to the buttons.  Enter presses the GREY button.  Esc = quit.'
 MD_TUI_NAV_MENU='Up/Down chooses an item.  TAB jumps to the buttons, then Left/Right moves between them.  Enter presses the button with the GREY highlight.  Esc = quit.'
 MD_TUI_NAV_ENTRY='Type the value, then TAB to the buttons (Left/Right moves between them).  Enter presses the button with the GREY highlight.  Esc = quit.'
 MD_TUI_NAV_YESNO='Arrows/TAB move.  Enter presses the GREY button.  Esc = quit.'
@@ -296,12 +297,29 @@ $MD_TUI_NAV_YESNO" "$h" "$w"
 tui_radiolist() {
   local title="$1"; shift
   if _tui_ok; then
-    local args=() ; while [ $# -ge 3 ]; do args+=("$1" "$2" "$3"); shift 3; done
-    whiptail --backtitle "$MD_TUI_BACKTITLE" --title "$title" --cancel-button "Exit" \
-      --radiolist "Select with SPACE, confirm with ENTER" 20 74 12 \
-      "${args[@]}" 3>&1 1>&2 2>&3 | tr -d '"'
+    local args=() val w cols
+    while [ $# -ge 3 ]; do args+=("$1" "$2" "$3"); shift 3; done
+    cols=$(tput cols 2>/dev/null || echo 80)
+    w=$((cols - 6)); [ "$w" -gt 78 ] && w=78; [ "$w" -lt 50 ] && w=50
+    # The old form piped whiptail into `tr`, so $? was TR's status: cancelling
+    # or pressing Esc looked like SUCCESS with an empty answer, and the caller
+    # carried on with an empty value. Capture first, check status, strip after.
+    # Geometry from the ITEM COUNT, not fixed at 20x12: the fixed box left no
+    # room under the list, so the navigation hint was cut off entirely --
+    # reported as the password-expiry and hardening screens having no TAB hint.
+    local n=$(( ${#args[@]} / 3 )) lh h
+    lh=$n; [ "$lh" -gt 10 ] && lh=10
+    h=$((lh + 12))
+    local maxh; maxh=$(tput lines 2>/dev/null || echo 24); maxh=$((maxh - 2))
+    [ "$h" -gt "$maxh" ] && { h=$maxh; lh=$((h - 12)); [ "$lh" -lt 3 ] && lh=3; }
+    if val=$(whiptail --backtitle "$MD_TUI_BACKTITLE" --title "$title" --cancel-button "Exit" \
+      --radiolist "Select with SPACE, confirm with ENTER
+
+$MD_TUI_NAV_LIST" "$h" "$w" "$lh" "${args[@]}" 3>&1 1>&2 2>&3); then
+      printf '%s' "${val//\"/}"; return 0
+    fi
+    return 1        # Exit/Esc -> caller runs md_abort
   else
-    # non-interactive: echo the one tag marked 'on'
     while [ $# -ge 3 ]; do [ "$3" = on ] && { printf '%s' "$1"; break; }; shift 3; done
   fi
 }
@@ -311,12 +329,26 @@ tui_radiolist() {
 tui_checklist() {
   local title="$1"; shift
   if _tui_ok; then
-    local args=() ; while [ $# -ge 3 ]; do args+=("$1" "$2" "$3"); shift 3; done
-    whiptail --backtitle "$MD_TUI_BACKTITLE" --title "$title" --cancel-button "Exit" \
-      --checklist "Select with SPACE, confirm with ENTER" 20 74 12 \
-      "${args[@]}" 3>&1 1>&2 2>&3 | tr -d '"'
+    local args=() val w cols
+    while [ $# -ge 3 ]; do args+=("$1" "$2" "$3"); shift 3; done
+    cols=$(tput cols 2>/dev/null || echo 80)
+    w=$((cols - 6)); [ "$w" -gt 78 ] && w=78; [ "$w" -lt 50 ] && w=50
+    # Geometry from the ITEM COUNT, not fixed at 20x12: the fixed box left no
+    # room under the list, so the navigation hint was cut off entirely --
+    # reported as the password-expiry and hardening screens having no TAB hint.
+    local n=$(( ${#args[@]} / 3 )) lh h
+    lh=$n; [ "$lh" -gt 10 ] && lh=10
+    h=$((lh + 12))
+    local maxh; maxh=$(tput lines 2>/dev/null || echo 24); maxh=$((maxh - 2))
+    [ "$h" -gt "$maxh" ] && { h=$maxh; lh=$((h - 12)); [ "$lh" -lt 3 ] && lh=3; }
+    if val=$(whiptail --backtitle "$MD_TUI_BACKTITLE" --title "$title" --cancel-button "Exit" \
+      --checklist "Select with SPACE, confirm with ENTER
+
+$MD_TUI_NAV_LIST" "$h" "$w" "$lh" "${args[@]}" 3>&1 1>&2 2>&3); then
+      printf '%s' "${val//\"/}"; return 0
+    fi
+    return 1        # Exit/Esc -> caller runs md_abort
   else
-    # non-interactive: echo the tags defaulted 'on'
     while [ $# -ge 3 ]; do [ "$3" = on ] && printf '%s ' "$1"; shift 3; done
   fi
 }
