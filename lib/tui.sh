@@ -11,7 +11,7 @@
 # tui_welcome's caller) right after its own early os_detect call, so in
 # practice these generic strings are only ever seen if that call was
 # somehow skipped.
-: "${MD_TUI_BACKTITLE:=mail-deploy — mail-server deployer  (Exit: Ctrl+X)}"
+: "${MD_TUI_BACKTITLE:=mail-deploy - mail-server deployer   (Esc = quit)}"
 
 # A calm, professional palette. whiptail's stock theme is the red/blue newt
 # default -- reported from a live run as "ridiculous". NEWT_COLORS restyles
@@ -22,26 +22,27 @@
 # a plain 16-colour TTY as well as a modern terminal.
 export NEWT_COLORS='
 root=,black
-window=,lightgray
-border=blue,lightgray
-title=blue,lightgray
-textbox=black,lightgray
-label=black,lightgray
-actbutton=white,blue
-button=black,lightgray
-compactbutton=black,lightgray
-checkbox=black,lightgray
-actcheckbox=white,blue
-entry=black,lightgray
-disentry=gray,lightgray
-listbox=black,lightgray
-actlistbox=white,blue
-sellistbox=white,blue
-actsellistbox=white,blue
-emptyscale=,gray
-fullscale=,blue
+shadow=,black
+window=,blue
+border=lightgray,blue
+title=white,blue
+textbox=white,blue
+label=white,blue
+emptyscale=,blue
+fullscale=,lightgray
 helpline=white,blue
 roottext=lightgray,black
+button=lightgray,blue
+actbutton=black,lightgray
+compactbutton=lightgray,blue
+entry=black,lightgray
+disentry=gray,blue
+checkbox=white,blue
+actcheckbox=black,lightgray
+listbox=white,blue
+actlistbox=black,lightgray
+sellistbox=black,lightgray
+actsellistbox=black,lightgray
 '
 
 : "${MD_OS_LABEL:=this host}"
@@ -70,33 +71,49 @@ _tui_ok() { command -v whiptail >/dev/null 2>&1 && [ -t 0 ] && { [ -t 1 ] || [ -
 # ENTER (or any other key) proceeds; Ctrl+X exits cleanly with no changes.
 tui_welcome() { # purpose_text
   [ -t 0 ] && [ -t 1 ] || return 0        # non-interactive: skip
-  clear 2>/dev/null || true
+  if _tui_ok; then
+    # The SAME widget family as every screen that follows. This used to be a
+    # raw `cat` banner with ASCII ==== rules and an invisible Ctrl+X
+    # convention, so the first thing an operator saw looked nothing like the
+    # rest of the wizard -- reported from a live run as not looking correct.
+    # A yesno states the two real choices as labelled buttons instead.
+    local lines maxh h scroll=() text="$1"
+    lines=$(printf '%s\n' "$text" | wc -l)
+    maxh=$(tput lines 2>/dev/null || echo 24); maxh=$((maxh - 2))
+    h=$((lines + 8))
+    if [ "$h" -gt "$maxh" ]; then
+      h=$maxh; scroll=(--scrolltext)
+      text="(more below - scroll with the DOWN arrow)
+
+$text"
+    fi
+    [ "$h" -lt 12 ] && h=12
+    whiptail --backtitle "$MD_TUI_BACKTITLE" \
+      --title "mail-deploy - ${MD_OS_LABEL} mail-server deployer" \
+      "${scroll[@]}" --yes-button "Begin" --no-button "Exit" \
+      --yesno "$text" "$h" 74 && return 0
+    # No / Esc: the deliberate way out, and nothing has been changed yet.
+    clear 2>/dev/null || true
+    printf 'Exited - no changes were made.\n'
+    exit 0
+  fi
+  # No whiptail (should not happen: ensure_tui installs it) -- plain fallback.
   cat <<BANNER
 
-  ============================================================
-   mail-deploy — interactive mail-server deployer ($MD_OS_LABEL)
-  ============================================================
+  mail-deploy - interactive mail-server deployer (${MD_OS_LABEL})
 
 $1
 
-  ------------------------------------------------------------
-   [ Press ENTER to begin   •   Ctrl+X to exit ]
-  ------------------------------------------------------------
+  [ Press ENTER to begin   -   Ctrl+X to exit ]
 
 BANNER
   local key
   IFS= read -rsn1 key || return 0
-  if [ "$key" = $'\x18' ]; then            # Ctrl+X
+  if [ "$key" = $'\x18' ]; then
     clear 2>/dev/null || true
-    printf 'Exited — no changes were made.\n'
+    printf 'Exited - no changes were made.\n'
     exit 0
   fi
-  # Drain anything still buffered from that keypress: `read -n1` consumes
-  # only one character, so the newline Enter produces (and any typeahead)
-  # would otherwise be delivered to the first whiptail dialog and
-  # auto-dismiss it. Cheap insurance, kept independently of the _tui_ok
-  # fix above -- that was the real cause of the reported "no entry field",
-  # this is a distinct, narrower hazard.
   while IFS= read -rs -t 0.05 -n 10000 _tui_leftover 2>/dev/null; do :; done
   return 0
 }
@@ -124,9 +141,40 @@ tui_msg() { # title text
 $text"
     fi
     [ "$h" -lt 12 ] && h=12
-    whiptail --backtitle "$MD_TUI_BACKTITLE" --title "$1" "${scroll[@]}" --msgbox "$text" "$h" 74
+    while true; do
+      whiptail --backtitle "$MD_TUI_BACKTITLE" --title "$1" "${scroll[@]}" --msgbox "$text" "$h" 74 && return 0
+      _tui_confirm_quit && md_abort      # Esc: confirm, else show it again
+    done
   else printf '%s: %s\n' "$1" "$2" >&2; fi
 }
+
+# Navigation hints, appended by the wrappers below. whiptail shows no key help
+# of its own: reported from a live run as "no hint how to switch to the OK or
+# Exit buttons". The backtitle also used to advertise Ctrl+X, which whiptail
+# has NO binding for -- it only ever worked on the old raw-text banner, so it
+# was a promise the wizard could not keep. These are the keys that work.
+# ONE WAY OUT, ON EVERY SCREEN. Esc used to be silently destructive on a
+# yes/no: whiptail returns 255 for Esc, and `if tui_yesno ...; then A; else B;
+# fi` ran B -- so a user pressing Esc to quit ANSWERED THE QUESTION "no" and
+# the wizard carried on. Now Esc (and the Exit/Cancel button, where one exists)
+# always asks, and a confirmed quit leaves without touching the host: nothing
+# is modified before the review screen, so exiting here is always clean.
+#
+# The value-returning wrappers run inside $( ), i.e. a SUBSHELL -- `exit` there
+# would kill only the subshell and let the installer carry on with an empty
+# value. They return 1 instead and rely on the caller's `|| md_abort`, which
+# every one of them has.
+_tui_confirm_quit() { # 0 = user really wants out
+  whiptail --backtitle "$MD_TUI_BACKTITLE" --title "Quit the installer?" \
+    --yes-button "Quit" --no-button "Stay" \
+    --yesno "Leave the installer now?
+
+Nothing has been changed on this host yet." 11 64
+}
+
+MD_TUI_NAV_MENU='Up/Down = choose   TAB = jump to the buttons   Enter = confirm   Esc = quit'
+MD_TUI_NAV_ENTRY='TAB = jump to the buttons   Enter = confirm   Esc = quit'
+MD_TUI_NAV_YESNO='Left/Right or TAB = switch buttons   Enter = confirm   Esc = quit'
 
 tui_menu() { # title prompt default_tag  tag1 desc1 [tag2 desc2 ...]
   # A real selection list where a choice exists -- reported from a live wizard
@@ -135,16 +183,33 @@ tui_menu() { # title prompt default_tag  tag1 desc1 [tag2 desc2 ...]
   # sensible answer so plain Enter keeps it, matching every other prompt here.
   local title="$1" prompt="$2" def="$3"; shift 3
   if _tui_ok; then
-    local n=$(( $# / 2 )); local h=$(( n + 10 )); [ "$h" -gt 22 ] && h=22
-    whiptail --backtitle "$MD_TUI_BACKTITLE" --title "$title"       --default-item "$def" --menu "$prompt" "$h" 74 "$n" "$@" 3>&1 1>&2 2>&3
+    local n=$(( $# / 2 )); local h=$(( n + 12 )); [ "$h" -gt 22 ] && h=22
+    local val
+    while true; do
+      if val=$(whiptail --backtitle "$MD_TUI_BACKTITLE" --title "$title" \
+        --default-item "$def" --menu "$prompt
+
+$MD_TUI_NAV_MENU" "$h" 74 "$n" "$@" 3>&1 1>&2 2>&3); then
+        printf '%s' "$val"; return 0
+      fi
+      _tui_confirm_quit && return 1
+    done
   else printf '%s' "$def"; fi
 }
 
 tui_input() { # prompt default   (exit status 1/255 = user chose Exit/Esc)
   local prompt="$1" def="${2:-}"
   if _tui_ok; then
-    whiptail --backtitle "$MD_TUI_BACKTITLE" --cancel-button "Exit" \
-      --inputbox "$prompt" 10 74 "$def" 3>&1 1>&2 2>&3
+    local val
+    while true; do
+      if val=$(whiptail --backtitle "$MD_TUI_BACKTITLE" --cancel-button "Exit" \
+        --inputbox "$prompt
+
+$MD_TUI_NAV_ENTRY" 12 74 "$def" 3>&1 1>&2 2>&3); then
+        printf '%s' "$val"; return 0
+      fi
+      _tui_confirm_quit && return 1
+    done
   else printf '%s' "$def"; fi
 }
 
@@ -158,7 +223,22 @@ tui_password() { # prompt   (exit status 1/255 = user chose Exit/Esc)
 
 tui_yesno() { # prompt  -> returns 0 for yes, 1 for no
   local prompt="$1"
-  if _tui_ok; then whiptail --backtitle "$MD_TUI_BACKTITLE" --yesno "$prompt" 10 74
+  if _tui_ok; then
+    local lines h maxh
+    lines=$(printf '%s\n' "$prompt" | wc -l); h=$((lines + 9))
+    maxh=$(tput lines 2>/dev/null || echo 24)
+    [ "$h" -gt $((maxh - 2)) ] && h=$((maxh - 2))
+    [ "$h" -lt 12 ] && h=12
+    local rc
+    while true; do
+      whiptail --backtitle "$MD_TUI_BACKTITLE" --yesno "$prompt
+
+$MD_TUI_NAV_YESNO" "$h" 74
+      rc=$?
+      [ "$rc" = 0 ] && return 0          # Yes
+      [ "$rc" = 1 ] && return 1          # a deliberate No -- NOT a quit
+      _tui_confirm_quit && md_abort      # 255 = Esc
+    done
   else return 0; fi
 }
 

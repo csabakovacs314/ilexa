@@ -717,7 +717,7 @@ main() {
     *)         os_pretty="${OS_ID^}" ;;
   esac
   MD_OS_LABEL="${os_pretty} ${OS_VERSION}"
-  MD_TUI_BACKTITLE="mail-deploy — ${MD_OS_LABEL} mail-server deployer  (Exit: Ctrl+X)"
+  MD_TUI_BACKTITLE="mail-deploy - ${MD_OS_LABEL} mail-server deployer   (Esc = quit)"
 
   # A fresh cloud image runs its first unattended update within minutes of
   # boot; ensure_tui's whiptail install (the first package touch, inside
@@ -730,7 +730,7 @@ main() {
     preflight_host                            # hard-fail root/OS, warn RAM/ports/repos
     show_sysinfo                              # record what the host looked like at t=0
   else
-    tui_welcome "$MD_PURPOSE"                 # start screen + Ctrl+X exit
+    tui_welcome "$MD_PURPOSE"                 # start screen: Begin / Exit buttons
     # preflight_host runs here, not before tui_welcome: tui_welcome clears the
     # screen on entry, which would wipe any warnings printed ahead of it. It
     # still lands before collect_interactive, so a refused host dies before
