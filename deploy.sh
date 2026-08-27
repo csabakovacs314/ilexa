@@ -404,7 +404,12 @@ apply_defaults() {
   : "${SPAM_ADD_HEADER:=4}"         # tag threshold
   : "${SPAM_REWRITE_SUBJECT:=6}"    # subject-tag threshold
   : "${SPAM_REJECT:=15}"            # safety-net reject; also arms the virus reject
-  : "${SPAM_SUBJECT_TAG:={Spam?}}"
+  # NOT `: "${SPAM_SUBJECT_TAG:={Spam?}}"` -- the parameter expansion ends at
+  # the FIRST closing brace, so that assigns "{Spam?" and leaves the final "}"
+  # as literal text outside the expansion. Answers-file installs pass a quoted
+  # value and were fine; the WIZARD path silently tagged every spam subject
+  # "{Spam? " with no closing brace.
+  [ -n "${SPAM_SUBJECT_TAG:-}" ] || SPAM_SUBJECT_TAG='{Spam?}'
   : "${RSPAMD_CTRL:=127.0.0.1:11334}"
   : "${RSPAMD_MILTER:=inet:127.0.0.1:11332}"
   : "${CLAMD_SOCKET:=/var/run/clamd.scan/clamd.sock}"

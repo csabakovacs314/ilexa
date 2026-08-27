@@ -767,5 +767,26 @@ CRON_ALERT_STATE_DIR=/var/cache/quarantine-admin
 17 4 * * * ${WEB_USER} /usr/bin/cron-alert.sh ilexa-update-check /usr/local/sbin/qa-update-check.sh --cron
 EOF
 
+# SQLite stores must end up owned by the WEB USER, not by root. Everything in
+# this module runs as root, and any step that opens iocs.db or logins.db creates
+# them root:root 0640 -- after which the crons that own them (they run as the
+# web user, deliberately, since they need no privilege) get EACCES. Seen on a
+# fresh install as qa-signin-monitor failing every five minutes with
+# "unable to open database file", alerting by mail each time, while the console
+# itself looked fine because it never writes them during a request.
+#
+# Normalised here, at the very end, so it covers whichever earlier step created
+# them. -journal/-wal siblings are included: SQLite writes those next to the
+# database and a root-owned journal blocks a write just as effectively.
+for _db in /var/cache/quarantine-admin/*.db \
+           /var/cache/quarantine-admin/*.db-journal \
+           /var/cache/quarantine-admin/*.db-wal \
+           /var/cache/quarantine-admin/*.db-shm; do
+  [ -e "$_db" ] || continue
+  chown "$WEB_USER:$WEB_GROUP" "$_db"
+  chmod 0640 "$_db"
+  log_info "sqlite store $(basename "$_db") owned by $WEB_USER"
+done
+
 mark_done 55-ilexa
 log_info "55-ilexa done — console at https://${MAIL_FQDN}${ILEXA_URL_PREFIX}"
