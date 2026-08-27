@@ -650,6 +650,41 @@ export_config() {
     WEB_USER WEB_GROUP ENABLE_ARCHIVE ARCHIVE_RETENTION_DAYS ENABLE_SIEM_EXPORT ENABLE_REPORT_ADDRESSES
 }
 
+# A WIZARD RUN LEAVES NO RECORD OF ITS ANSWERS, which makes the host
+# un-maintainable: `deploy.sh --only <module>` needs an answers file, so on a
+# wizard-built machine there is no supported way to re-run a single module --
+# including the repair paths modules carry for exactly that purpose. Hit while
+# repairing such a host: the answers had to be reconstructed by hand from the
+# live configuration.
+#
+# Written 0600 root:root, and SECRETS ARE OMITTED -- passwords and API keys are
+# deliberately not persisted, so the file is a starting point for a re-run
+# rather than a credential store. Anything omitted is re-prompted or re-derived.
+save_answers() {
+  [ "$DRY_RUN" = 1 ] && return 0
+  local out=/var/lib/ilexa-install/answers.effective k v
+  mkdir -p /var/lib/ilexa-install
+  { echo "# Effective answers from the run on $(date -Is)."
+    echo "# Regenerated every run. Secrets are NOT stored: add them back by hand"
+    echo "# if a re-run needs them. Usage: deploy.sh --answers $out --only <module>"
+    for k in MAIL_FQDN PRIMARY_DOMAIN EXTRA_DOMAINS ADMIN_EMAIL ALERT_EMAIL \
+             MAIL_STORE TLS_MODE CERTBOT_METHOD TIMEZONE SYSTEM_LANG \
+             ENABLE_ARCHIVE ARCHIVE_RETENTION_DAYS ENABLE_GREYLISTING \
+             ENABLE_REPORT_ADDRESSES ENABLE_QUOTA ENABLE_OTX ENABLE_FEEDS \
+             ENABLE_LAST_LOGIN ENABLE_FTS_XAPIAN ENABLE_UNATTENDED \
+             ENABLE_MX_CHECK ENABLE_KNOWN_SENDERS ENABLE_IPV6 ENABLE_SIEVE \
+             PASSWORD_EXPIRY_DAYS SPAM_SUBJECT_TAG GEOBLOCK_COUNTRIES \
+             HARDEN_SSH_KEYONLY HARDEN_WEBMIN HARDEN_KERNEL_AUTOREBOOT \
+             HARDEN_SMTP_TUNING HARDEN_SELINUX; do
+      v="${!k-}"
+      [ -n "${!k+x}" ] || continue
+      printf '%s=%s\n' "$k" "$v"
+    done
+  } > "$out"
+  chmod 0600 "$out"; chown root:root "$out"
+  log_info "answers recorded in $out (no secrets) — usable with --answers for a later --only run"
+}
+
 summary_text() {
   cat <<EOF
 FQDN:            $MAIL_FQDN
@@ -742,6 +777,7 @@ main() {
   apply_defaults
   validate
   export_config
+  save_answers          # so this host can be re-run later; see the function
   log_info "configuration:"; summary_text | while IFS= read -r l; do log_info "  $l"; done
   if [ -z "$ANSWERS" ]; then
     tui_review "$(summary_text)" || md_abort   # Abort button on review = clean exit

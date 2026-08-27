@@ -6,6 +6,27 @@
 # longer invoked by a separate scanner.
 source "$MD_ROOT/lib/common.sh"
 load_secrets   # RSPAMD_CTRL_PW if an earlier run already generated one
+# REPAIR, BEFORE THE GUARD -- so an EXISTING host gets it too. deploy.sh used
+# to default the tag with `: "${SPAM_SUBJECT_TAG:={Spam?}}"`, where the
+# parameter expansion ends at the FIRST closing brace: that assigned "{Spam?"
+# and left the "}" as literal text outside it. Answers-file installs passed a
+# quoted value and were unaffected, so only WIZARD-built hosts carry the
+# truncated tag -- and they would keep carrying it forever, because this
+# module's marker is already set and the template is never re-rendered.
+#
+# Narrow on purpose: it only rewrites the exact truncated form, so an operator
+# who deliberately chose their own tag is left alone.
+if [ "$DRY_RUN" != 1 ] && [ -f /etc/rspamd/local.d/actions.conf ] \
+   && grep -q '^subject = "{Spam? %s";' /etc/rspamd/local.d/actions.conf; then
+  sed -i 's/^subject = "{Spam? %s";/subject = "{Spam?} %s";/' /etc/rspamd/local.d/actions.conf
+  log_info "repaired truncated spam subject tag in actions.conf ({Spam? -> {Spam?})"
+  if rspamadm configtest >/dev/null 2>&1; then
+    systemctl reload rspamd >/dev/null 2>&1 || true
+  else
+    log_warn "actions.conf repaired but rspamadm configtest failed — not reloading"
+  fi
+fi
+
 step_guard 40-rspamd || exit 0
 
 # ---- repo + packages -------------------------------------------------------

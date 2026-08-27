@@ -16,6 +16,33 @@ source "$MD_ROOT/lib/common.sh"
 # the console's Archivum and Audit > Logins were broken from the start.
 source "$MD_ROOT/lib/db.sh"
 load_secrets
+# REPAIR, BEFORE THE GUARD -- so an EXISTING host gets it too. Everything in
+# this module runs as root, so whichever step first opens iocs.db or logins.db
+# creates them root:root 0640, after which the crons that use them (they run as
+# the web user, deliberately, needing no privilege) get EACCES. Observed on a
+# wizard-built host: qa-signin-monitor failed every five minutes and mailed an
+# alert each time, and qa-feed-sample reported success while sampling nothing.
+#
+# This sits ABOVE step_guard because a host that already has the marker would
+# otherwise never be corrected -- the fix would only ever help fresh installs.
+# Idempotent and cheap: it chowns files that exist and says nothing when there
+# is nothing to do.
+_qa_fix_sqlite_owner() {
+  local db changed=0
+  for db in /var/cache/quarantine-admin/*.db \
+            /var/cache/quarantine-admin/*.db-journal \
+            /var/cache/quarantine-admin/*.db-wal \
+            /var/cache/quarantine-admin/*.db-shm; do
+    [ -e "$db" ] || continue
+    [ "$(stat -c '%U' "$db" 2>/dev/null)" = "$WEB_USER" ] && continue
+    chown "$WEB_USER:$WEB_GROUP" "$db" && chmod 0640 "$db" && changed=1
+    log_info "repaired ownership of $(basename "$db") -> $WEB_USER"
+  done
+  [ "$changed" = 1 ] && log_info "sqlite stores re-owned; the web-user crons can write them again"
+  return 0
+}
+[ "$DRY_RUN" = 1 ] || _qa_fix_sqlite_owner
+
 step_guard 55-ilexa || exit 0
 
 if [ "${ENABLE_ILEXA:-yes}" != yes ]; then
@@ -767,26 +794,7 @@ CRON_ALERT_STATE_DIR=/var/cache/quarantine-admin
 17 4 * * * ${WEB_USER} /usr/bin/cron-alert.sh ilexa-update-check /usr/local/sbin/qa-update-check.sh --cron
 EOF
 
-# SQLite stores must end up owned by the WEB USER, not by root. Everything in
-# this module runs as root, and any step that opens iocs.db or logins.db creates
-# them root:root 0640 -- after which the crons that own them (they run as the
-# web user, deliberately, since they need no privilege) get EACCES. Seen on a
-# fresh install as qa-signin-monitor failing every five minutes with
-# "unable to open database file", alerting by mail each time, while the console
-# itself looked fine because it never writes them during a request.
-#
-# Normalised here, at the very end, so it covers whichever earlier step created
-# them. -journal/-wal siblings are included: SQLite writes those next to the
-# database and a root-owned journal blocks a write just as effectively.
-for _db in /var/cache/quarantine-admin/*.db \
-           /var/cache/quarantine-admin/*.db-journal \
-           /var/cache/quarantine-admin/*.db-wal \
-           /var/cache/quarantine-admin/*.db-shm; do
-  [ -e "$_db" ] || continue
-  chown "$WEB_USER:$WEB_GROUP" "$_db"
-  chmod 0640 "$_db"
-  log_info "sqlite store $(basename "$_db") owned by $WEB_USER"
-done
+[ "$DRY_RUN" = 1 ] || _qa_fix_sqlite_owner   # again: this run may have created them
 
 mark_done 55-ilexa
 log_info "55-ilexa done — console at https://${MAIL_FQDN}${ILEXA_URL_PREFIX}"
