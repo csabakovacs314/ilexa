@@ -125,7 +125,7 @@ if is_info_rc "$rc"; then
     logger -t "$tag" "NOTICE (rc=$rc) — no alert recipient configured, journal only (set one in the console's Admin tab)"
     exit "$rc"
   fi
-  mail -s "[$tag] NOTICE (rc=$rc) on $host" "$MAILTO" < "$body"
+  send_alert "[$tag] NOTICE (rc=$rc) on $host" "$body"
   exit "$rc"
 fi
 
@@ -162,6 +162,41 @@ fi
   cat "$out"
 } > "$body"
 
+# Send one alert. Prefers mail(1) when present, falls back to sendmail(8).
+#
+# mail(1) is NOT installed on a stock Ubuntu or EL image -- it comes from
+# bsd-mailx/mailutils/s-nail, none of which this stack installs. On a fresh
+# host every alert therefore died as "mail: command not found", the wrapper
+# still exited 0, and the only trace was the journal line it had already
+# written. An operator who had entered an address in the console's Admin tab
+# had no way to discover that nothing was ever delivered. Found 2026-08-27 on
+# a clean 24.04 box; the reference host had s-nail from some earlier install,
+# which is why it never showed.
+#
+# sendmail(8) is the right fallback rather than a new package dependency:
+# postfix provides it, and this stack installs postfix by definition. A host
+# that cannot run sendmail has no working mail system to alert about.
+send_alert() { # subject bodyfile
+    local subject="$1" bodyfile="$2"
+    if command -v mail >/dev/null 2>&1; then
+        mail -s "$subject" "$MAILTO" < "$bodyfile"
+        return $?
+    fi
+    if command -v sendmail >/dev/null 2>&1; then
+        { printf 'To: %s\n' "$MAILTO"
+          printf 'Subject: %s\n' "$subject"
+          printf 'Auto-Submitted: auto-generated\n'
+          printf 'X-Ilexa-Alert: %s\n\n' "$tag"
+          cat "$bodyfile"
+        } | sendmail -t -f "root@${host}"
+        return $?
+    fi
+    # Never silent: if neither exists the operator must be able to find out why
+    # an alert they configured did not arrive.
+    logger -t "$tag" "cannot send alert: neither mail(1) nor sendmail(8) found — alert body is journal-only"
+    return 1
+}
+
 # No recipient configured => journal only. Deliberately logs at the same point
 # it would have mailed, so "did this fail?" stays answerable from the journal
 # without notifications ever being switched on.
@@ -169,6 +204,6 @@ if [ -z "$MAILTO" ]; then
     logger -t "$tag" "FAILED (rc=$rc) — no alert recipient configured, journal only (set one in the console's Admin tab)"
     exit "$rc"
 fi
-mail -s "[$tag] FAILED (rc=$rc) on $host" "$MAILTO" < "$body"
+send_alert "[$tag] FAILED (rc=$rc) on $host" "$body"
 
 exit "$rc"
