@@ -1,6 +1,6 @@
 {
     "schema": 1,
-    "serial": 16,
+    "serial": 19,
     "channel": "stable",
     "releases": [
         {
