@@ -357,8 +357,23 @@ step "3/3  Installing"
 say "fetching the installer ..."
 if command -v apt-get >/dev/null 2>&1; then
     export DEBIAN_FRONTEND=noninteractive
-    apt-get update -qq
-    apt-get install -y -qq git ca-certificates >/dev/null
+    # DPkg::Lock::Timeout is not politeness, it is the difference between
+    # working and not on a box that booted minutes ago. unattended-upgrades
+    # runs on first boot and holds the dpkg frontend lock for minutes; apt does
+    # not wait by default, it fails after ~3 seconds. lib/common.sh has carried
+    # this for the module path since 2026-08-17, but these two bootstrap calls
+    # were written without it and died before the repository was even cloned:
+    #
+    #   E: Could not get lock /var/lib/dpkg/lock-frontend.
+    #      It is held by process 1170 (unattended-upgr)
+    #
+    # Caught on a reimaged host four minutes after boot -- the exact case the
+    # preflight above had just WARNED about, and then failed on regardless.
+    # A warning the code does not act on is decoration.
+    _apt() { apt-get -o DPkg::Lock::Timeout="${APT_LOCK_WAIT:-600}" "$@"; }
+    say "waiting for any first-boot package activity to finish ..."
+    _apt update -qq
+    _apt install -y -qq git ca-certificates >/dev/null
 else
     dnf -y -q install git ca-certificates >/dev/null
 fi
