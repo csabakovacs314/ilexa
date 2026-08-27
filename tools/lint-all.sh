@@ -137,6 +137,18 @@ elif [ "$quiet" != 1 ]; then
   echo "$fg_out" | tail -1
 fi
 
+# The spam/ham report handler's sender gate decides who may train the Bayes
+# classifier every user depends on. It was domain-level once, which let a
+# forged local sender poison the filter; these cases pin the decision table and
+# the two fail-closed paths.
+rs_out="$("$HERE/tools/check-report-sender.sh" 2>&1)"; rs_rc=$?
+if [ "$rs_rc" != 0 ]; then
+  echo "$rs_out"
+  fail=1
+elif [ "$quiet" != 1 ]; then
+  echo "$rs_out" | tail -1
+fi
+
 echo "lint-all: ${#files[@]} scripts checked -- $syntax_fail syntax errors, $sc_errors shellcheck errors, $sc_warnings shellcheck warnings, $path_fail missing paths"
 
 [ "$fail" = 1 ] && exit 1

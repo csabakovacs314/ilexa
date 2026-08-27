@@ -103,11 +103,33 @@ smtpd_relay_restrictions = permit_mynetworks,
     reject_unauth_destination
 
 policyd-spf_time_limit = 3600
-smtpd_recipient_restrictions =
+# The report-address auth gate is FIRST and lives HERE, in the template, not in
+# a postconf -e from 58-report-learn. It used to be prepended imperatively after
+# this file was rendered, which meant any later re-render of main.cf silently
+# removed it -- `deploy.sh --only 20-postfix` was enough. The maps and the
+# restriction class survived, so nothing looked wrong, while unauthenticated
+# mail to spam@/ham@ went back to being accepted and the Bayes-poisoning path
+# reopened without a word. Declarative here, so a re-render restores it.
+# Empty when ENABLE_REPORT_ADDRESSES=no.
+# NOTE: render() substitutes with sed, so every placeholder value must be a
+# SINGLE LINE. A value containing a newline does not merely render oddly -- it
+# breaks the substitution and the parameter disappears from main.cf entirely,
+# which took smtpd_recipient_restrictions out completely and stopped Postfix
+# answering on port 25. Keep these inline.
+#
+# Do not write a placeholder token inside a comment either: render() scans the
+# whole file, comments included, and dies on any name it cannot resolve.
+smtpd_recipient_restrictions =@@REPORT_AUTH_CHECK@@
     permit_mynetworks,
     permit_sasl_authenticated,
     reject_unauth_destination,
-    check_policy_service unix:private/policyd-spf@@QUOTA_POLICY@@
+    check_policy_service unix:private/policyd-spf@@QUOTA_POLICY@@@@GREYLIST_POLICY@@
+
+# Restriction classes. Both empty when ENABLE_REPORT_ADDRESSES=no; an unused
+# user-defined parameter is harmless, and keeping the lines unconditional is
+# what lets these stay single-line and sed-safe.
+smtpd_restriction_classes =@@RESTRICTION_CLASSES@@
+report_auth_only =@@REPORT_AUTH_ONLY@@
 
 smtpd_data_restrictions =
     reject_unauth_pipelining,
@@ -239,6 +261,23 @@ smtpd_sender_login_maps =
 #   grep 'not owned by user' /var/log/mail.log  (Debian/Ubuntu)
 # then switch to enforce once the list is understood and each case is either
 # legitimised (add the address to the sender's alias goto) or corrected.
+# NOTE: policyd-spf is NOT called from this list. It is wired into
+# smtpd_recipient_restrictions above, AFTER permit_sasl_authenticated, which is
+# the correct place -- an authenticated user is permitted before the SPF check
+# is ever reached.
+#
+# IF YOU EVER ADD A POLICY SERVICE HERE, PUT permit_sasl_authenticated BEFORE
+# IT -- immediately after the login guard, never before it, or the guard stops
+# binding an authenticated sender to its own identity.
+#
+# Why it matters: SPF validates the sending IP for a domain, which is
+# meaningless for a user who has authenticated and may legitimately be sending
+# from anywhere. The reference host (hawking) had policyd-spf in THIS list with
+# no permit ahead of it, and so SPF-checked its own authenticated users against
+# records that cannot list their home broadband: 116 Softfail annotations a day
+# from one office, sitting there as a landmine -- the moment anyone set
+# policyd-spf's TestOnly=0 it would have started rejecting a council's own mail.
+# Fixed on that host 2026-08-27; this installer never had the bug.
 smtpd_sender_restrictions = @@SENDER_LOGIN_GUARD@@permit_mynetworks, permit
 
 smtpd_delay_reject = @@SMTPD_DELAY_REJECT@@

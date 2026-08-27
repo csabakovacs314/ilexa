@@ -1,16 +1,16 @@
 {
     "schema": 1,
-    "serial": 18,
+    "serial": 16,
     "channel": "stable",
     "releases": [
         {
-            "version": "1.0.17",
+            "version": "1.0.18",
             "codename": "Duna",
-            "tag": "v1.0.17",
+            "tag": "v1.0.18",
             "released_at": "2026-08-27",
-            "commit": "fcbf4c2",
-            "severity": "fix",
-            "requires_installer": false,
+            "commit": "0c10728",
+            "severity": "security",
+            "requires_installer": true,
             "min_upgrade_from": "0.0.0",
             "schema_version": {
                 "mysql": 1,
@@ -19,55 +19,11 @@
             },
             "app_tarball": {
                 "path": "assets/ilexa-app.tar.gz",
-                "sha256": "d07b06211ff7f1b6a670274667fb0b4b35eb3b3c22d915a046ed643f6087af39",
-                "size": 1896880
+                "sha256": "78fa9940fc54c9fcfc89173cd93ca81bce2e054b1444d2fc680e732d77e86e67",
+                "size": 1949653
             },
-            "notes_hu": "A frissitesi csempe azonnal a most inditott futast mutatja.",
-            "notes_en": "The update tile now shows the run you just started, not the previous one."
-        },
-        {
-            "version": "1.0.16",
-            "codename": "Duna",
-            "tag": "v1.0.16",
-            "released_at": "2026-08-27",
-            "commit": "f8ae374",
-            "severity": "fix",
-            "requires_installer": false,
-            "min_upgrade_from": "0.0.0",
-            "schema_version": {
-                "mysql": 1,
-                "iocs": 2,
-                "logins": 3
-            },
-            "app_tarball": {
-                "path": "assets/ilexa-app.tar.gz",
-                "sha256": "1032722f632b882ba53a9b2fd38957862cba49470c665d79d36e42e1becb277d",
-                "size": 1896339
-            },
-            "notes_hu": "A hirnev-lekerdezesek mostantol a PHP segedprogramon futnak.",
-            "notes_en": "Reputation lookups now run on the PHP helper instead of the shell one."
-        },
-        {
-            "version": "1.0.15",
-            "codename": "Duna",
-            "tag": "v1.0.15",
-            "released_at": "2026-08-27",
-            "commit": "eb6d5e4",
-            "severity": "fix",
-            "requires_installer": false,
-            "min_upgrade_from": "0.0.0",
-            "schema_version": {
-                "mysql": 1,
-                "iocs": 2,
-                "logins": 3
-            },
-            "app_tarball": {
-                "path": "assets/ilexa-app.tar.gz",
-                "sha256": "a43e3c0b516590e722f610ff87e1c5e4ec6acba971ee6d3dd7b9b19d0fe119a8",
-                "size": 1901903
-            },
-            "notes_hu": "A hirnev-lekerdezo segedprogram PHP valtozata is telepul.",
-            "notes_en": "Ships a PHP implementation of the reputation-lookup helper; the shell one still runs."
+            "notes_hu": "E-mail-kitetts\u00e9g: t\u00f6bbszolg\u00e1ltat\u00f3s (XposedOrNot+LeakCheck+HudsonRock) \u00f3r\u00e1nk\u00e9nti postafi\u00f3k-ellen\u0151rz\u00e9s k\u00f6z\u00f6s, lemezen t\u00e1rolt API-kerettel; spam@/ham@ csak hiteles\u00edtett felad\u00f3t\u00f3l, val\u00f3s postafi\u00f3k-ellen\u0151rz\u00e9ssel (Bayes-m\u00e9rgez\u00e9s lez\u00e1rva); postgrey sz\u00fcrkelist\u00e1z\u00e1s kapcsolhat\u00f3an; m\u0171szerfal forr\u00e1s-jel\u00f6l\u0151kkel. A jelent\u00e9si kapu, a postgrey \u00e9s az \u00f3r\u00e1nk\u00e9nti cron a telep\u00edt\u0151 futtat\u00e1s\u00e1t ig\u00e9nyli (--only 20-postfix 21-greylist 58-report-learn). A sweep szolg\u00e1ltat\u00f3it a Rendszer lapon kell enged\u00e9lyezni.",
+            "notes_en": "Email exposure: multi-provider (XposedOrNot+LeakCheck+HudsonRock) hourly mailbox sweep on a shared on-disk API budget; spam@/ham@ now require an authenticated sender that is a real mailbox (Bayes-poisoning path closed); switchable postgrey greylisting; dashboard per-source markers. The report gate, postgrey and the hourly cron need the installer (--only 20-postfix 21-greylist 58-report-learn). Enable the sweep providers on the System tab."
         },
         {
             "version": "1.0.14",
@@ -400,6 +356,6 @@
             "notes_en": "Baseline release: version display, update checking, database migration framework."
         }
     ],
-    "latest": "1.0.17",
-    "generated_at": "2026-08-27T08:57:13Z"
+    "latest": "1.0.18",
+    "generated_at": "2026-08-27T20:26:47Z"
 }

@@ -335,6 +335,16 @@ render() {
     if [ -z "${!var+x}" ]; then
       die "template $tmpl references @@${key}@@ but MD_VAR_${key} is unset"
     fi
+    # A MULTI-LINE VALUE IS FATAL, and silently so without this check.
+    # Substitution is sed, so a newline in the replacement does not merely
+    # render oddly -- it breaks the expression and the parameter vanishes from
+    # the output entirely. Caught the hard way: a newline in one placeholder
+    # deleted smtpd_recipient_restrictions from main.cf, and Postfix stopped
+    # answering on port 25 with nothing in the install log to say why. An unset
+    # placeholder already dies here; a malformed one now does too.
+    case "$val" in
+      *$'\n'*) die "template $tmpl: MD_VAR_${key} contains a newline; render() substitutes with sed and every placeholder value must be a single line" ;;
+    esac
     # escape sed replacement metacharacters: \ & and the / delimiter
     val=${val//\\/\\\\}; val=${val//&/\\&}; val=${val//\//\\/}
     sedargs+=(-e "s/@@${key}@@/${val}/g")

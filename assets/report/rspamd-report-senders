@@ -1,0 +1,88 @@
+#!/usr/bin/env bash
+#
+# rspamd-report-senders — regenerate the list of addresses allowed to report
+# spam/ham, for rspamd-report-learn's sender check.
+#
+# WHY THIS FILE EXISTS. The report handler used to accept any sender whose
+# DOMAIN was local, so "nobody@hernad.hu" — an address that does not exist —
+# could report. That is the Bayes-poisoning path: the envelope sender is
+# Postfix's ${sender}, which an unauthenticated party can simply assert, and
+# on the reference host nothing upstream stopped them (policyd-spf runs
+# TestOnly=1 and every domain publishes ~all, so a forged local sender is
+# annotated, not rejected). Mailing ham@ with spam content then trains the
+# filter to ACCEPT spam, for every user on the server.
+#
+# The handler therefore checks the full address against this list. It must be
+# a file because the handler runs as the unprivileged 'rspamreport' user: it
+# has no database credentials, cannot read the Maildir tree (0700 postfix),
+# and giving it either — or a `doveadm user` sudo grant — would be a far wider
+# hole than the one being closed.
+#
+# MAILBOXES ONLY, NOT ALIASES. An alias has no password and cannot
+# authenticate, so mail claiming to come from one is either forwarded traffic
+# or a forgery; tying a report to a real mailbox is what makes it accountable.
+# The cost is that a user whose client sends as an alias has their report
+# ignored (logged, never bounced). If that turns up in practice, the fix is to
+# widen this query, not to loosen the handler.
+#
+# Run at install time by modules/58-report-learn.sh and periodically by cron,
+# because mailboxes are added and removed through PostfixAdmin long after the
+# installer last ran.
+#
+#   rspamd-report-senders [--quiet]
+set -uo pipefail
+
+OUT=/etc/rspamd-report/senders.txt
+TMP="${OUT}.tmp.$$"
+QUIET=0
+[ "${1:-}" = "--quiet" ] && QUIET=1
+log() { [ "$QUIET" = 1 ] || echo "rspamd-report-senders: $*"; }
+die() { echo "rspamd-report-senders: $*" >&2; rm -f "$TMP"; exit 1; }
+
+[ "$(id -u)" = 0 ] || die "must run as root (reads the postfix database over the unix socket)"
+install -d -m 0755 /etc/rspamd-report
+
+# Same access path as the installer's db_exec(): root over the local socket, no
+# stored password. --skip-column-names so the output is bare addresses.
+if ! rows=$(mysql --batch --skip-column-names --database=postfix \
+              -e "SELECT username FROM mailbox WHERE active=1;" 2>/dev/null); then
+    die "cannot query the postfix database — leaving $OUT untouched"
+fi
+
+# Validate before writing: these lines become an allow-list for a security
+# check, so anything that is not a plain lowercase address is dropped rather
+# than trusted.
+printf '%s\n' "$rows" \
+  | tr 'A-Z' 'a-z' | tr -d '[:blank:]' \
+  | grep -E '^[a-z0-9._%+-]+@[a-z0-9]([a-z0-9.-]*[a-z0-9])?\.[a-z]{2,}$' \
+  | sort -u > "$TMP"
+
+count=$(wc -l < "$TMP")
+raw=$(printf '%s\n' "$rows" | grep -c '[^[:space:]]' || true)
+
+# NEVER PUBLISH AN EMPTY LIST. The handler fails closed on one, so a transient
+# database hiccup would silently stop every user being able to report until
+# someone noticed. Keeping the previous list is the lesser evil: it is stale by
+# at most one refresh interval, where an empty one is a total outage.
+#
+# TWO DIFFERENT SITUATIONS LOOK THE SAME HERE, and conflating them made a clean
+# install look broken. A FRESH host has no mailboxes at all yet -- module 58
+# runs before anyone has created one -- so an empty result is expected, not a
+# fault, and saying "query returned no usable addresses" put a WARN in the
+# install log pointing at nothing wrong. Rows returned that were ALL rejected by
+# the address filter is a different story: that means the table holds something
+# unexpected, and it deserves the error.
+if [ "$count" -lt 1 ]; then
+    rm -f "$TMP"
+    if [ "${raw:-0}" -eq 0 ]; then
+        echo "rspamd-report-senders: no active mailboxes yet -- nothing to allow." \
+             "$OUT stays absent (the handler denies reports until it exists), and" \
+             "the 15-minute refresh will write it once mailboxes are created."
+        exit 0
+    fi
+    die "the database returned $raw row(s) but none were usable addresses — leaving $OUT untouched"
+fi
+
+chmod 0644 "$TMP"
+mv -f "$TMP" "$OUT"
+log "$count address(es) permitted to report"

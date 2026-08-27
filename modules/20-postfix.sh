@@ -42,7 +42,7 @@ setvar MAIL_GID "$MAIL_GID"
 setvar POLICYD_SPF_USER "$POLICYD_SPF_USER"
 setvar POLICYD_SPF_BIN "$POLICYD_SPF_BIN"
 for k in PRIMARY_DOMAIN MAIL_FQDN MAIL_STORE MESSAGE_SIZE_LIMIT SMTPD_DELAY_REJECT SENDER_LOGIN_GUARD RSPAMD_MILTER \
-         POSTSCREEN_DNSBL_SITES TLS_CERT TLS_KEY TLS_CAFILE INET_PROTOCOLS MYNETWORKS QUOTA_POLICY; do
+         POSTSCREEN_DNSBL_SITES TLS_CERT TLS_KEY TLS_CAFILE INET_PROTOCOLS MYNETWORKS QUOTA_POLICY GREYLIST_POLICY REPORT_AUTH_CHECK RESTRICTION_CLASSES REPORT_AUTH_ONLY; do
   setvar "$k" "${!k}"
 done
 # always_bcc belongs to 57-archive.sh (central mail archive), which sets it
@@ -76,6 +76,29 @@ setvar POSTSCREEN_DNSBL_SITES "$POSTSCREEN_DNSBL_SITES"
 
 _prev_always_bcc=""
 [ "$DRY_RUN" = 1 ] || _prev_always_bcc="$(postconf -h always_bcc 2>/dev/null)"
+
+# The report-address maps must EXIST before main.cf names them, even though
+# 58-report-learn is what fills them in. Postfix does not treat a missing
+# check_recipient_access map as "no match" -- it fails the lookup, and every
+# recipient gets 451 4.3.5. On a fresh install the gap between this module and
+# 58 spans dovecot, clamav, rspamd and the web stack, so the server would defer
+# ALL mail for most of the run; `deploy.sh --only 20-postfix` on a live host
+# would do the same until 58 was run again.
+#
+# Empty is the right placeholder: no recipient matches, so the restriction class
+# never fires and the gate is simply inert until 58 populates it. Created with
+# noclobber semantics -- an existing map is left exactly as 58 wrote it.
+if [ "${ENABLE_REPORT_ADDRESSES:-yes}" = yes ] && [ "$DRY_RUN" != 1 ]; then
+  for _m in report_auth report_deny; do
+    if [ ! -f "/etc/postfix/$_m" ]; then
+      printf '# placeholder created by 20-postfix; populated by 58-report-learn\n' \
+        > "/etc/postfix/$_m"
+      chmod 0644 "/etc/postfix/$_m"
+      postmap "hash:/etc/postfix/$_m"
+      log_info "created empty /etc/postfix/$_m so main.cf can reference it before 58 runs"
+    fi
+  done
+fi
 
 render "$MD_TEMPLATES/postfix/main.cf.tmpl"   /etc/postfix/main.cf
 

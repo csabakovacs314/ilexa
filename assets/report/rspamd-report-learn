@@ -12,8 +12,10 @@
 #  scanner-added headers, and feed it to `rspamc learn_<class>` on localhost
 #  (controller trusts 127.0.0.1 → no password).
 #
-#  Hardening: internal-sender only, size caps, global rate limit, must carry
-#  a message/rfc822 attachment. Always exits 0 (never bounce/defer a report).
+#  Hardening: the envelope sender must be a REAL ACTIVE MAILBOX on a local
+#  domain (not merely any address at a local domain -- see the sender check
+#  below for why that mattered), size caps, global rate limit, must carry a
+#  message/rfc822 attachment. Always exits 0 (never bounce/defer a report).
 #  Every outcome is logged to syslog (mail facility → /var/log/maillog).
 # ─────────────────────────────────────────────────────────────────
 import sys, os, re, time, subprocess, syslog
@@ -27,14 +29,79 @@ SENDER       = (sys.argv[2] if len(sys.argv) > 2 and sys.argv[2] else (os.enviro
 SENDER       = SENDER.lower().strip().strip('<>')
 STATE_DIR    = '/var/lib/rspamd-report'
 DOMAINS_FILE = '/etc/rspamd-report/domains.txt'
+SENDERS_FILE = '/etc/rspamd-report/senders.txt'
 MAX_TOTAL    = 8 * 1024 * 1024      # whole report cap
 MAX_ORIG     = 4 * 1024 * 1024      # extracted original cap
 RATE_MAX     = 120                  # max learns per window
 RATE_WIN     = 60                   # seconds
 
+# ── preserving what we refuse ────────────────────────────────────────────────
+#
+# This handler runs as a Postfix pipe and exits 0 on every path, which tells
+# Postfix "delivered". For a report we then refuse, that means the user's
+# message is GONE: no bounce, no delivery, no trace beyond a syslog line. The
+# operator asked for exactly one thing here -- do not lose mail -- so a refused
+# report is written to a spool file instead of evaporating.
+#
+# NOT EVERY REFUSAL IS PRESERVED, and the exclusion is deliberate. A report
+# from a FOREIGN domain is refused before anything else and is, in practice,
+# forgery or spam arriving from the open internet at an unauthenticated
+# endpoint. Spooling those would hand anyone a way to fill this disk by mailing
+# ham@ in a loop -- trading a mail-loss problem for an outage. Those stay
+# discarded, as they always have been.
+#
+# What IS preserved is the case where a plausible human's message would vanish:
+# a sender at one of our own domains, or a failure that is our fault (a broken
+# allow-list refusing everybody), or a real verified reporter who simply
+# forwarded inline instead of as an attachment -- historically the single most
+# common way a report was lost here.
+#
+# The spool is bounded in both files and bytes, oldest pruned first, so it
+# cannot grow without limit even from local senders.
+PRESERVE_DIR   = '/var/spool/rspamd-report-denied'
+PRESERVE_FILES = 200
+PRESERVE_BYTES = 50 * 1024 * 1024
+
+def _preserve(reason):
+    """Write the refused message to the spool. Best effort, never fatal."""
+    try:
+        blob = globals().get('data')
+        if not blob:
+            return ''
+        os.makedirs(PRESERVE_DIR, mode=0o700, exist_ok=True)
+        os.chmod(PRESERVE_DIR, 0o700)
+        # Prune BEFORE writing, so the cap is honoured even by this message.
+        try:
+            files = sorted(
+                (os.path.join(PRESERVE_DIR, n) for n in os.listdir(PRESERVE_DIR)),
+                key=lambda p: os.stat(p).st_mtime)
+            total = sum(os.stat(p).st_size for p in files)
+            while files and (len(files) >= PRESERVE_FILES
+                             or total + len(blob) > PRESERVE_BYTES):
+                victim = files.pop(0)
+                total -= os.stat(victim).st_size
+                os.unlink(victim)
+        except OSError:
+            pass
+        safe = re.sub(r'[^A-Za-z0-9@._-]', '_', SENDER)[:64] or 'unknown'
+        path = os.path.join(
+            PRESERVE_DIR,
+            f'{time.strftime("%Y%m%dT%H%M%S")}-{os.getpid()}-{CLASS}-{safe}.eml')
+        # 0600: a refused report is still somebody's mail.
+        fd = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
+        with os.fdopen(fd, 'wb') as fh:
+            fh.write(b'X-Ilexa-Report-Refused: ' + reason.encode('utf-8', 'replace') + b'\n')
+            fh.write(b'X-Ilexa-Report-Sender: ' + SENDER.encode('utf-8', 'replace') + b'\n')
+            fh.write(blob)
+        return f' preserved={os.path.basename(path)}'
+    except Exception:
+        return ''
+
 syslog.openlog('rspamd-report', syslog.LOG_PID, syslog.LOG_MAIL)
-def done(msg, learned=False):
-    syslog.syslog(syslog.LOG_INFO, f'class={CLASS} sender=<{SENDER}> {"LEARN" if learned else "skip"}: {msg}')
+def done(msg, learned=False, preserve=False):
+    kept = _preserve(msg) if (preserve and not learned) else ''
+    syslog.syslog(syslog.LOG_INFO,
+                  f'class={CLASS} sender=<{SENDER}> {"LEARN" if learned else "skip"}: {msg}{kept}')
     sys.exit(0)                     # never bounce/defer
 
 if CLASS not in ('spam', 'ham'):
@@ -44,15 +111,55 @@ data = sys.stdin.buffer.read(MAX_TOTAL + 1)
 if len(data) > MAX_TOTAL:
     done('report too large')
 
-# ── internal-sender check ──
-ours = set()
-try:
-    ours = {l.strip().lower() for l in open(DOMAINS_FILE) if l.strip()}
-except OSError:
-    pass
+# ── sender check ──
+#
+# TWO GATES, AND THE SECOND ONE IS THE IMPORTANT ONE.
+#
+# SENDER is Postfix's ${sender}: the ENVELOPE sender, which an unauthenticated
+# party asserts and nothing here has verified. This used to check only that its
+# DOMAIN was local, so "nobody@hernad.hu" — an address that does not exist —
+# was accepted and learned. That is a Bayes-poisoning path straight into the
+# filter every user depends on: mail ham@ with spam content from a forged local
+# sender and the classifier is trained to ACCEPT spam.
+#
+# Nothing upstream closes it on the reference host. reject_authenticated_-
+# sender_login_mismatch binds authenticated senders only; policyd-spf runs
+# TestOnly=1 (annotate, never reject) and the mail domains publish ~all, which
+# Mail_From_reject=Fail does not act on. So the check has to be here.
+#
+# Gate 1 (domains.txt): which domains may report at all — the policy knob.
+# Gate 2 (senders.txt): the address must be a REAL, ACTIVE MAILBOX.
+#
+# Both fail CLOSED. An unreadable or empty list denies every report rather than
+# falling back to the weaker check: this project has been bitten before by a
+# helper reading a broken state as a clean one (the rbl.conf Abusix incident),
+# and a report that is silently dropped costs one training sample, where a
+# forged one costs the filter's accuracy for everybody.
+def _load(path):
+    try:
+        with open(path) as fh:
+            return {l.strip().lower() for l in fh if l.strip() and not l.startswith('#')}
+    except OSError:
+        return set()
+
+ours = _load(DOMAINS_FILE)
+if not ours:
+    done(f'no reportable domains configured ({DOMAINS_FILE} missing or empty) - denying',
+         preserve=True)
 dom = SENDER.rsplit('@', 1)[-1] if '@' in SENDER else ''
 if not dom or dom not in ours:
     done('sender not an internal domain')
+
+senders = _load(SENDERS_FILE)
+if not senders:
+    # Deliberately distinct from "not a mailbox": this one is our fault, not
+    # the reporter's, and it means EVERY report is being dropped until the
+    # refresher runs. It needs to look different in the log.
+    done(f'sender allow-list unavailable ({SENDERS_FILE} missing or empty) - denying all reports',
+         preserve=True)
+if SENDER not in senders:
+    # Aliases land here too, by design -- see rspamd-report-senders' header.
+    done('sender is not an active mailbox on this server', preserve=True)
 
 # ── global rate limit (simple per-window counter) ──
 try:
@@ -67,7 +174,9 @@ try:
     except (OSError, ValueError):
         pass
     if cnt >= RATE_MAX:
-        done('rate limit exceeded')
+        # Already past both sender gates, so this is a verified reporter whose
+        # message would otherwise vanish because somebody else was noisy.
+        done('rate limit exceeded', preserve=True)
     with open(rf, 'w') as f:
         f.write(f'{win} {cnt + 1}')
 except OSError:
@@ -82,7 +191,11 @@ for part in msg.walk():
         orig = pl[0].as_bytes() if isinstance(pl, list) and pl else part.get_payload(decode=True)
         break
 if not orig:
-    done('no message/rfc822 attachment')
+    # The commonest way a report was lost: a verified reporter who forwarded
+    # the spam INLINE instead of as an attachment. Their message was correct
+    # in every other respect and simply disappeared -- 5 of the 16 reports
+    # this endpoint had ever received went this way.
+    done('no message/rfc822 attachment', preserve=True)
 if len(orig) > MAX_ORIG:
     done('original too large')
 
@@ -147,4 +260,7 @@ try:
     done(f'bytes={len(learn_body)} saved={saved} fuzzy={fuzzy} rc={p.returncode} rspamc="{out[:200]}"',
          learned=(p.returncode == 0))
 except Exception as e:
-    done(f'rspamc error: {e}')
+    # The report was valid and the sender verified; learning failed on OUR
+    # side. Losing it here would be the worst case of all -- a correct report,
+    # correctly submitted, silently binned because of our fault.
+    done(f'rspamc error: {e}', preserve=True)

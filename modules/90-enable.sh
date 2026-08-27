@@ -27,6 +27,13 @@ fi
 if [ "$ENABLE_METRICS" = yes ]; then
   [ "$PKG_MGR" = apt ] && CORE+=(prometheus-node-exporter) || CORE+=(node_exporter)
 fi
+# Same unit name on both families. 21-greylist already restarted it with the
+# real config; this is what makes it survive a reboot. If the package was not
+# available the loop below warns and moves on -- main.cf's default_action=DUNNO
+# means mail still flows without greylisting.
+if [ "${ENABLE_GREYLISTING:-yes}" = yes ]; then
+  CORE+=(postgrey)
+fi
 
 for u in "${CORE[@]}"; do
   if [ "$DRY_RUN" = 1 ]; then log_info "[dry-run] enable --now $u"; continue; fi

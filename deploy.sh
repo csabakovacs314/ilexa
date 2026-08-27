@@ -411,7 +411,19 @@ apply_defaults() {
   : "${ILEXA_ADMIN_USER:=admin}"
   : "${ILEXA_ADMIN_PASSWORD:=}"        # blank = generated and recorded
   : "${QUARANTINE_FOLDERS:=Junk Quarantine Spam}"
-  : "${ARCHIVE_USER:=archive@$PRIMARY_DOMAIN}"
+  # Only when archiving is actually on. Defaulting it unconditionally left
+  # config.php naming archive@<domain> on a host where module 57 never created
+  # that mailbox, so 99-verify reported "archive account resolves - FAIL" on a
+  # perfectly good install, pointing a red line at a feature the operator had
+  # deliberately turned off. Empty is also the honest value: qa-verify-console.sh
+  # already skips the check when no archive account is configured, and an empty
+  # ARCHIVE_USER makes qa-doveadm.sh's INBOX guard fail CLOSED (no user can
+  # match ""), which is exactly what "archiving is off" should mean.
+  if [ "${ENABLE_ARCHIVE:-no}" = yes ]; then
+    : "${ARCHIVE_USER:=archive@$PRIMARY_DOMAIN}"
+  else
+    : "${ARCHIVE_USER:=}"
+  fi
   # Falls back to the host's current zone, not a blind UTC -- an unattended run
   # that says nothing about time should not silently move the clock.
   : "${TIMEZONE:=$(timedatectl show -p Timezone --value 2>/dev/null || echo UTC)}"
@@ -463,6 +475,30 @@ apply_defaults() {
     QUOTA_FIELD=", CASE WHEN quota<=0 THEN '*:bytes=0' ELSE CONCAT('*:bytes=', quota) END AS quota_rule"
     QUOTA_POLICY=", check_policy_service unix:private/quota-status"
   else QUOTA_FIELD=""; QUOTA_POLICY=""; fi
+    # Greylisting (postgrey). default_action=DUNNO is deliberate, and is the
+    # OPPOSITE of how the API-budget ledger fails: greylisting is an
+    # optimisation, not a security boundary, so if postgrey is down the right
+    # answer is "skip greylisting", never "defer every message". Without it a
+    # dead policy daemon takes the whole MTA with it -- Postfix defers on an
+    # unreachable policy service by default. Inline attribute syntax needs
+    # Postfix >= 3.0.
+    : "${ENABLE_GREYLISTING:=yes}"
+    if [ "$ENABLE_GREYLISTING" = yes ]; then
+      GREYLIST_POLICY=", check_policy_service { inet:127.0.0.1:10023, default_action=DUNNO }"
+    else GREYLIST_POLICY=""; fi
+    # Report-address auth gate, rendered into main.cf rather than prepended
+    # afterwards -- see the note in templates/postfix/main.cf.tmpl for the
+    # silent-regression this prevents. Must come FIRST in the recipient
+    # restrictions, ahead of the permit_* rules that would otherwise let an
+    # unauthenticated client straight through.
+    : "${ENABLE_REPORT_ADDRESSES:=yes}"
+    if [ "$ENABLE_REPORT_ADDRESSES" = yes ]; then
+      # SINGLE LINE each -- render() is sed-based; a newline here deletes the
+      # whole parameter from main.cf. Learned the hard way on the test host.
+      REPORT_AUTH_CHECK=" check_recipient_access hash:/etc/postfix/report_auth,"
+      RESTRICTION_CLASSES=" report_auth_only"
+      REPORT_AUTH_ONLY=" permit_mynetworks, permit_sasl_authenticated, check_recipient_access hash:/etc/postfix/report_deny"
+    else REPORT_AUTH_CHECK=""; RESTRICTION_CLASSES=""; REPORT_AUTH_ONLY=""; fi
   : "${ENABLE_AUTOCONFIG:=yes}"
   : "${HARDEN_SSH_KEYONLY:=yes}"; : "${ADMIN_SSH_PUBKEY:=}"
   : "${HARDEN_SELINUX:=no}"; : "${HARDEN_WEBMIN:=yes}"; : "${WEBMIN_ALLOW_IPS:=127.0.0.1}"
@@ -566,7 +602,7 @@ export_config() {
     ENABLE_OTX OTX_API_KEY OTX_TRUSTED_CIDRS SPAMHAUS_DQS_KEY ABUSIX_API_KEY ENABLE_LAST_LOGIN ENABLE_FTS_XAPIAN ENABLE_UNATTENDED \
     ENABLE_MX_CHECK ENABLE_KNOWN_SENDERS ENABLE_HU_BRAND_GUARD \
     ENABLE_MTA_STS MTA_STS_MODE TLSRPT_RUA ENABLE_IPV6 INET_PROTOCOLS MYNETWORKS ENABLE_SIEVE \
-    ENABLE_QUOTA QUOTA_FIELD QUOTA_POLICY ENABLE_METRICS METRICS_SCRAPE_CIDR ENABLE_AUTOCONFIG ENABLE_FTS_OPTIMIZE \
+    ENABLE_QUOTA QUOTA_FIELD QUOTA_POLICY ENABLE_GREYLISTING GREYLIST_POLICY REPORT_AUTH_CHECK RESTRICTION_CLASSES REPORT_AUTH_ONLY ENABLE_METRICS METRICS_SCRAPE_CIDR ENABLE_AUTOCONFIG ENABLE_FTS_OPTIMIZE \
     HARDEN_SSH_KEYONLY ADMIN_SSH_PUBKEY HARDEN_SELINUX HARDEN_WEBMIN WEBMIN_ALLOW_IPS \
     HARDEN_KERNEL_AUTOREBOOT HARDEN_SMTP_TUNING MESSAGE_SIZE_LIMIT BACKUP_TARGET BACKUP_PASSPHRASE \
     SMTPD_DELAY_REJECT SENDER_LOGIN_GUARD POSTSCREEN_DNSBL_SITES TLS_DIR TLS_CERT TLS_KEY TLS_CAFILE SSH_PORT WEBMIN_PORT \

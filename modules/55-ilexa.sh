@@ -443,6 +443,22 @@ if [ "$DRY_RUN" != 1 ]; then
 fi
 
 # ---- logrotate + cron ------------------------------------------------------
+# check-breaches.log is written by root from cron, hourly, so it is rotated
+# separately from the web user's logs below (different owner, and it did not
+# used to be rotated at all -- which mattered much less at one run a night).
+write_file /etc/logrotate.d/ilexa-breach-check 0644 root:root <<EOF
+/var/log/check-breaches.log {
+    su root root
+    weekly
+    rotate 8
+    compress
+    delaycompress
+    missingok
+    notifempty
+    create 640 root root
+}
+EOF
+
 write_file /etc/logrotate.d/ilexa 0644 root:root <<EOF
 /var/log/quarantine-admin/*.log {
     weekly
@@ -514,8 +530,14 @@ fi
     # through cron-alert.sh, which reads /etc/ilexa/alerts.conf and stays
     # silent until an address is configured in the Admin tab.
     echo 'MAILTO=""'
+  # HOURLY, not nightly. The providers publish per-hour limits as well as
+  # per-day ones (XposedOrNot: 2/sec, 25/hour, 100/day), and a single nightly
+  # burst hits the HOURLY cap and stops -- which on the reference host meant 25
+  # mailboxes checked a night instead of 100, silently, for months. The budget
+  # in qa-quota-lib.php models every window; each run takes what the hour
+  # allows. Offset to :07 to stay clear of the top-of-hour cron rush.
   [ "${ENABLE_BREACH_CHECK:-no}" = yes ] && \
-    echo "0 2 * * * root /usr/local/sbin/check-breaches.py >> /var/log/check-breaches.log 2>&1"
+    echo "7 * * * * root /usr/local/sbin/check-breaches.py >> /var/log/check-breaches.log 2>&1"
   echo "QA_DIGEST_TO=${ADMIN_EMAIL}"
   echo "0 7 * * 1 root /usr/local/sbin/qa-weekly-digest.php >> /var/log/qa-digest.log 2>&1"
   # Skipped entirely when expiry is disabled: PostfixAdmin's own +0-days
