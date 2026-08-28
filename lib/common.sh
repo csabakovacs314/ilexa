@@ -565,7 +565,19 @@ pkg_lock_wait() {
 
 svc_try() { # unit...  -> 0/1, never aborts
   if [ "$DRY_RUN" = 1 ]; then log_info "[dry-run] systemctl enable --now $*"; return 0; fi
-  systemctl enable --now "$@" && return 0
+  # `systemctl enable` on Debian/Ubuntu invokes deb-systemd-helper, which
+  # prints "Synchronizing state of X.service with SysV service script..." /
+  # "Executing: /usr/lib/systemd/systemd-sysv-install enable X" for every
+  # unit -- unconditionally, success or not, and NEVER suppressed by -q.
+  # Reported live as raw text corrupting the install gauge: pkg_try
+  # (apt-get/dnf) was gauge-aware, this sibling helper was not, so every
+  # svc_enable call in every module -- ~15 call sites -- still wrote straight
+  # to the screen the whole time this feature has existed.
+  if [ "${MD_PROGRESS_ACTIVE:-0}" = 1 ]; then
+    systemctl enable --now "$@" >>"$MD_LOG" 2>&1 && return 0
+  else
+    systemctl enable --now "$@" && return 0
+  fi
   log_warn "failed to enable: $*"; return 1
 }
 

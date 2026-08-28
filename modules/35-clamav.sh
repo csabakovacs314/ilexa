@@ -257,6 +257,11 @@ fi
 # populates /var/lib/clamav with .yar content.
 if [ "$DRY_RUN" != 1 ]; then
   LOCALD=/etc/rspamd/local.d
+  # rspamd itself is module 40, installed AFTER this one -- on a fresh host
+  # /etc/rspamd does not exist yet at this point, and `touch` into a missing
+  # directory dies outright ("No such file or directory"), taking the whole
+  # module down with it. Reported live on a genuinely fresh Ubuntu install.
+  install -d -m 755 "$LOCALD"
   touch "$LOCALD/groups.conf"
   if ! grep -q '"CLAM_YARA"' "$LOCALD/groups.conf"; then
     cat >> "$LOCALD/groups.conf" <<'EOF'
