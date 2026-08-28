@@ -2,6 +2,14 @@
 # 75-tls-dns — TLS certs (Let's Encrypt or self-signed) + unbound local resolver
 # (127.0.0.1 first so postscreen can resolve the otx.rbl DNSBL zone).
 source "$MD_ROOT/lib/common.sh"
+# tui.sh/progress.sh: this module is the one place outside deploy.sh itself
+# that shows a real interactive dialog (the DNS retry prompt below), so it
+# needs tui_menu/_tui_ok directly rather than relying on what deploy.sh
+# exported. Both files use non-clobbering `:=` for any state a parent process
+# may have already exported (MD_TUI_BACKTITLE, MD_PROGRESS_ACTIVE), so
+# re-sourcing them here does not reset anything inherited.
+source "$MD_ROOT/lib/tui.sh"
+source "$MD_ROOT/lib/progress.sh"
 step_guard 75-tls-dns || exit 0
 
 pkg_install unbound
@@ -137,7 +145,7 @@ _print_dns_fix() { # names...
 # the records to create and offer to re-check -- the certificate is issued once
 # per run, and getting the names in on THIS pass avoids a second one.
 build_cert_names() {
-  local n host_addrs cand_addrs missing ans
+  local n host_addrs cand_addrs missing
   while :; do
     CERT_NAMES=(-d "$MAIL_FQDN")
     missing=()
@@ -155,32 +163,54 @@ build_cert_names() {
 
     [ "${#missing[@]}" -gt 0 ] || return 0
 
-    # No terminal (unattended run, cron, piped installer): keep the previous
-    # behaviour exactly -- warn per name and carry on with an FQDN-only cert.
-    #
-    # The test must OPEN /dev/tty, not stat it: -r/-w only check permissions on
-    # the device node, which pass even when the process has no controlling
-    # terminal. Getting this wrong made an unattended run fall into the prompt,
-    # fail the read, and log the wrong reason ("at the operator's request") for
-    # a skip nobody was asked about.
-    if ! { true >/dev/tty; } 2>/dev/null || [ "${MD_ASSUME_YES:-0}" = 1 ]; then
+    # Not interactive (unattended run, cron, piped installer) OR whiptail is
+    # not usable here: warn per name and carry on with an FQDN-only cert --
+    # unchanged from before.
+    if ! _tui_ok || [ "${MD_ASSUME_YES:-0}" = 1 ]; then
       for n in "${missing[@]}"; do
         log_warn "skipping $n in the certificate: it does not resolve yet. Create the DNS record shown at the end of this run (CNAME -> $MAIL_FQDN), then re-run --only 75-tls-dns to add it."
       done
       return 0
     fi
 
-    _print_dns_fix "${missing[@]}" > /dev/tty
-    printf '  [R] re-check DNS   [S] skip these names and continue  > ' > /dev/tty
-    read -r ans < /dev/tty || ans=S
-    case "$ans" in
-      r|R|'')
-        # Ask the authoritative servers, not the local cache, so a record added
-        # seconds ago is actually seen.
+    # A real dialog, not a raw /dev/tty read: reported live as needing the
+    # required records shown plainly plus Exit/Skip/Retry, not a bare R/S
+    # prompt with no way to see what "exit" even did. Esc is Exit, matching
+    # every other screen in this wizard (nothing has been changed by this
+    # module yet at the point this can trigger -- TLS request comes after).
+    #
+    # progress_yield FIRST: a whiptail dialog cannot share the terminal with
+    # the install gauge (lib/progress.sh) even while the gauge is idle
+    # between updates -- two curses programs fight over the same alternate
+    # screen buffer. The gauge does not resume after this; seeing it vanish
+    # here is the honest cost of needing a human to fix a DNS record mid-run.
+    progress_yield
+    local dns_table
+    dns_table="$(_print_dns_fix "${missing[@]}")"
+    local pick
+    pick=$(tui_menu "DNS records needed" \
+      "$dns_table
+These names do not point at this host yet. The certificate order will
+proceed WITHOUT them if you skip -- Thunderbird/Outlook autoconfig and
+MTA-STS will not work for the skipped names until you add the record and
+re-run: ./deploy.sh --only 75-tls-dns --answers <answers file>" \
+      retry \
+      retry "Re-check DNS now" \
+      skip  "Skip these names and continue") || module_abort
+      # Cancel/Esc on this menu (labelled "Exit") aborts the WHOLE install --
+      # the same convention as every other screen -- rather than quietly
+      # skipping only these names. "Skip" below is the separate, explicit
+      # choice for continuing without them; conflating the two was reported
+      # as needing distinct Exit/Skip/Retry, not two of the three collapsed.
+    case "$pick" in
+      retry)
+        # Ask the authoritative servers, not the local cache, so a record
+        # added seconds ago is actually seen.
+        local recheck=""
         for n in "${missing[@]}"; do
-          printf '      %-32s %s\n' "$n" "$(_addrs_authoritative "$n" | tr '\n' ' ' | sed 's/ $//' || true)" > /dev/tty
+          recheck="$recheck$(printf '%-32s %s\n' "$n" "$(_addrs_authoritative "$n" | tr '\n' ' ' | sed 's/ $//' || true)")"
         done
-        printf '\n' > /dev/tty
+        tui_msg "DNS re-check" "$recheck"
         continue ;;
       *)
         for n in "${missing[@]}"; do

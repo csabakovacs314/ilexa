@@ -44,6 +44,24 @@ require_root() { [ "$(id -u)" -eq 0 ] || die "must run as root"; }
 # clean user-initiated exit (Exit button / Esc / Ctrl+X) — no error, no changes
 md_abort() { clear 2>/dev/null || true; log_info "cancelled by user — no changes were made"; exit 0; }
 
+# Distinct from md_abort above. Every md_abort call site is in the wizard's
+# Q&A phase, before run_modules() has touched anything -- "no changes were
+# made" is true there. A module deep into run_modules() (75-tls-dns's DNS
+# retry prompt is the first case) can also offer an Exit choice, but by then
+# earlier modules already changed the host for real; saying otherwise would be
+# a lie on screen. It also runs in a SEPARATE `bash "$m"` process from
+# deploy.sh's own -- a bare `exit 0` there only ends that one module
+# successfully and run_modules() would happily continue to the next one,
+# which is the opposite of what "Exit" is supposed to do. MD_ABORT_RC is the
+# signal run_modules() checks for to tell a deliberate stop apart from a
+# module actually failing.
+MD_ABORT_RC=97
+module_abort() {
+  clear 2>/dev/null || true
+  log_info "installation stopped at the operator's request — modules that already ran before this point were NOT rolled back"
+  exit "$MD_ABORT_RC"
+}
+
 require_cmd() { # cmd...
   local missing=()
   local c

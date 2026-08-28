@@ -748,7 +748,16 @@ run_modules() {
     pct=$(( (idx - 1) * 100 / total ))
     progress_update "$pct" "$(progress_label_for "$base")"
     log_info "=== module $base ==="
-    bash "$m" || {
+    bash "$m"; rc=$?
+    if [ "$rc" = "$MD_ABORT_RC" ]; then
+      # A module's own interactive prompt (e.g. 75-tls-dns's DNS retry
+      # dialog) offered Exit and the operator took it -- module_abort()
+      # (lib/common.sh) signals that with this exit code specifically so it
+      # is not mistaken for the module having failed.
+      progress_stop
+      log_info "install stopped at $base by operator request"
+      exit 0
+    elif [ "$rc" -ne 0 ]; then
       # Every log_* call is silenced on screen while the gauge owns it (see
       # _log in lib/common.sh) -- including a log_error from INSIDE the
       # module's own subprocess, which inherits MD_PROGRESS_ACTIVE. Without
@@ -760,7 +769,7 @@ run_modules() {
       log_warn "--- last log lines before the failure ---"
       tail -n 25 "$MD_LOG" >&2 2>/dev/null
       die "module $base failed"
-    }
+    fi
   done
   progress_update 100 "Done"
   progress_stop

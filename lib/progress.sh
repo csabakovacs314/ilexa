@@ -21,12 +21,18 @@
 # log_warn do the same via _log, so nothing else can scribble on the gauge
 # while it owns the screen.
 
-MD_PROGRESS_FIFO=""
-MD_PROGRESS_PID=""
-MD_PROGRESS_ACTIVE=0
-MD_PROGRESS_LAST_PCT=0
-MD_PROGRESS_LAST_LABEL=""
-export MD_PROGRESS_ACTIVE MD_PROGRESS_LAST_PCT MD_PROGRESS_LAST_LABEL
+# Non-clobbering (`:=`), not a plain assignment: modules now source this file
+# too (75-tls-dns, for progress_yield -- see below), and a module inherits
+# MD_PROGRESS_ACTIVE=1 from the parent as an exported env var. A hard `=0`
+# here would silently reset that inherited state the moment the module
+# sourced this file, defeating pkg_try's output redirection for the rest of
+# that module's own package installs.
+: "${MD_PROGRESS_FIFO:=}"
+: "${MD_PROGRESS_PID:=}"
+: "${MD_PROGRESS_ACTIVE:=0}"
+: "${MD_PROGRESS_LAST_PCT:=0}"
+: "${MD_PROGRESS_LAST_LABEL:=}"
+export MD_PROGRESS_ACTIVE MD_PROGRESS_LAST_PCT MD_PROGRESS_LAST_LABEL MD_PROGRESS_PID
 # All three exported: a module subprocess needs MD_PROGRESS_ACTIVE to know
 # whether to redirect its own package output, and the last pct/label so a
 # transient message (e.g. "waiting for the system's own updates") can be
@@ -71,7 +77,14 @@ progress_start() { # title
 progress_update() { # percent label
   [ "$MD_PROGRESS_ACTIVE" = 1 ] || return 0
   local pct="$1" label="$2"
-  { printf 'XXX\n%s\n%s\nXXX\n' "$pct" "$label" >&8; } 2>/dev/null \
+  # The write runs in a SUBSHELL with SIGPIPE trapped away: if the gauge's
+  # reader is gone (progress_yield killed it from a module, or it simply
+  # crashed) writing to fd 8 raises SIGPIPE, whose default disposition KILLS
+  # the writing process outright -- which would silently abort whatever
+  # module happened to call this next, with no error message pointing at why.
+  # Trapping it only inside the subshell means a dead gauge degrades to "no
+  # more updates", never to "the install stopped".
+  ( trap '' PIPE; printf 'XXX\n%s\n%s\nXXX\n' "$pct" "$label" >&8 ) 2>/dev/null \
     || { MD_PROGRESS_ACTIVE=0; return 0; }
   MD_PROGRESS_LAST_PCT="$pct"; MD_PROGRESS_LAST_LABEL="$label"
 }
@@ -88,6 +101,28 @@ progress_note() {
 # MD_PROGRESS_ACTIVE above) -- a plain function definition does not, only
 # `export -f` does.
 export -f progress_update progress_note
+
+# progress_yield -- for a module that needs the REAL terminal for its own
+# interactive dialog (a whiptail --yesno/--menu of its own), not just a status
+# line. Two whiptail instances cannot share a terminal: the gauge holds the
+# alternate screen buffer even while idle between updates, and a second
+# curses program launched on top of it corrupts the display rather than
+# nesting cleanly. Unlike progress_stop, this is written to be called FROM A
+# MODULE'S OWN PROCESS -- it only has MD_PROGRESS_PID (exported) and its own
+# copy of MD_PROGRESS_ACTIVE, not the fifo path or any other parent-only
+# state, and it does not try to hand control back: the gauge does not resume
+# for the remainder of this run. That is a deliberate, honest trade -- an
+# install that needed a human to fix a DNS record already stopped being a
+# quiet unattended run, and modules after this point are a small fraction of
+# the total (75-tls-dns, the one caller today, is roughly five-sixths through
+# the module list).
+progress_yield() {
+  [ "$MD_PROGRESS_ACTIVE" = 1 ] || return 0
+  MD_PROGRESS_ACTIVE=0
+  [ -n "$MD_PROGRESS_PID" ] && kill "$MD_PROGRESS_PID" 2>/dev/null
+  if [ -t 1 ]; then tput rmcup 2>/dev/null; tput cnorm 2>/dev/null; fi
+}
+export -f progress_yield
 
 progress_stop() {
   [ "$MD_PROGRESS_ACTIVE" = 1 ] || return 0
