@@ -563,6 +563,36 @@ pkg_lock_wait() {
   log_info "package manager free after ${waited}s — continuing"
 }
 
+# Reactive waiting alone was not enough: apt-daily-upgrade.timer fired
+# SECONDS after this box came up, and unattended-upgrade held the dpkg lock
+# not just at the start but at random points across the whole ~10-minute
+# install -- observed live, timer firing 07:51:57 while the install was
+# already running. Every pkg_lock_wait call caught the contention correctly
+# and waited it out, but the operator ALSO saw unattended-upgrade's own
+# package-manager output (postinst noise, dpkg trigger messages) on the
+# shared console/terminal each time -- output that is not ours to redirect,
+# since it comes from a process we did not start.
+#
+# Called once, early (deploy.sh, right after the first pkg_lock_wait), this
+# masks the TIMERS so they cannot fire again for the rest of this boot -- it
+# does NOT touch a currently-running unattended-upgrade instance, which
+# would risk leaving dpkg mid-transaction. An already-in-progress run (if
+# any) still drains through the existing wait loop exactly as before; this
+# only prevents a SECOND or THIRD occurrence later in the same install.
+# Idempotent and safe to call more than once.
+pkg_disable_auto_updates() {
+  [ "${DRY_RUN:-0}" = 1 ] && { log_info "[dry-run] would mask apt-daily(-upgrade).timer / dnf-makecache.timer for the duration of this install"; return 0; }
+  if command -v apt-get >/dev/null 2>&1; then
+    systemctl stop apt-daily.timer apt-daily-upgrade.timer 2>/dev/null
+    systemctl mask apt-daily.timer apt-daily-upgrade.timer 2>/dev/null
+    log_info "masked apt-daily.timer / apt-daily-upgrade.timer for the rest of this install -- a currently-running unattended-upgrade, if any, is left to finish naturally"
+  else
+    systemctl stop dnf-makecache.timer packagekit.service 2>/dev/null
+    systemctl mask dnf-makecache.timer 2>/dev/null
+    log_info "masked dnf-makecache.timer for the rest of this install"
+  fi
+}
+
 svc_try() { # unit...  -> 0/1, never aborts
   if [ "$DRY_RUN" = 1 ]; then log_info "[dry-run] systemctl enable --now $*"; return 0; fi
   # `systemctl enable` on Debian/Ubuntu invokes deb-systemd-helper, which

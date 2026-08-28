@@ -810,6 +810,13 @@ main() {
   # look hung. Drain visibly before any UI or package work. See
   # pkg_lock_wait() in lib/common.sh.
   pkg_lock_wait
+  # Not enough on its own: apt-daily-upgrade.timer can fire again LATER in a
+  # ~10-minute install even after this first wait drained a lock that was
+  # already held -- observed live, contention recurring well after this
+  # point. Masking the timers here means it cannot happen a second time; see
+  # pkg_disable_auto_updates() in lib/common.sh for what it does and does not
+  # touch.
+  pkg_disable_auto_updates
   if [ -n "$ANSWERS" ]; then
     load_answers
     preflight_host                            # hard-fail root/OS, warn RAM/ports/repos
