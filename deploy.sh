@@ -16,6 +16,8 @@ export MD_ROOT
 source "$MD_ROOT/lib/common.sh"
 # shellcheck source=lib/tui.sh
 source "$MD_ROOT/lib/tui.sh"
+# shellcheck source=lib/progress.sh
+source "$MD_ROOT/lib/progress.sh"
 # shellcheck source=lib/db.sh
 source "$MD_ROOT/lib/db.sh"
 
@@ -713,6 +715,9 @@ EOF
 
 run_modules() {
   local m base run
+  # Which modules will actually run, decided up front, so the gauge's total
+  # matches --only exactly rather than counting modules that get skipped.
+  local -a to_run=()
   for m in "$MD_ROOT"/modules/[0-9]*.sh; do
     [ -e "$m" ] || die "no modules found in $MD_ROOT/modules"
     base=$(basename "$m" .sh)
@@ -720,9 +725,32 @@ run_modules() {
       run=0; local o; for o in "${ONLY[@]}"; do [[ "$base" == "$o"* ]] && run=1; done
       [ "$run" = 1 ] || continue
     fi
-    log_info "=== module $base ==="
-    bash "$m" || die "module $base failed"
+    to_run+=("$m")
   done
+  local total=${#to_run[@]} idx=0 pct
+  progress_start "Installing"
+  for m in "${to_run[@]}"; do
+    base=$(basename "$m" .sh)
+    idx=$((idx + 1))
+    pct=$(( (idx - 1) * 100 / total ))
+    progress_update "$pct" "$(progress_label_for "$base")"
+    log_info "=== module $base ==="
+    bash "$m" || {
+      # Every log_* call is silenced on screen while the gauge owns it (see
+      # _log in lib/common.sh) -- including a log_error from INSIDE the
+      # module's own subprocess, which inherits MD_PROGRESS_ACTIVE. Without
+      # this, the actual reason a module died would reach only $MD_LOG, and
+      # the operator would see nothing but "module X failed" on a now-blank
+      # screen. Tear the gauge down FIRST so log_warn below is visible again,
+      # then surface what the module itself reported before dying.
+      progress_stop
+      log_warn "--- last log lines before the failure ---"
+      tail -n 25 "$MD_LOG" >&2 2>/dev/null
+      die "module $base failed"
+    }
+  done
+  progress_update 100 "Done"
+  progress_stop
 }
 
 main() {

@@ -43,7 +43,11 @@ deb [signed-by=/etc/apt/keyrings/rspamd.gpg] https://rspamd.com/apt-stable/ ${co
 EOF
     # -o DPkg::Lock::Timeout: unattended-upgrades holds the lock on fresh
     # Ubuntu boxes; see pkg_try() in lib/common.sh.
-    apt-get -o DPkg::Lock::Timeout="${APT_LOCK_WAIT:-600}" update -qq
+    if [ "${MD_PROGRESS_ACTIVE:-0}" = 1 ]; then
+      apt-get -o DPkg::Lock::Timeout="${APT_LOCK_WAIT:-600}" update -qq >>"$MD_LOG" 2>&1
+    else
+      apt-get -o DPkg::Lock::Timeout="${APT_LOCK_WAIT:-600}" update -qq
+    fi
   fi
 else
   if [ "$DRY_RUN" != 1 ] && [ ! -f /etc/yum.repos.d/rspamd.repo ]; then

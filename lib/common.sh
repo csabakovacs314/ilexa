@@ -24,7 +24,12 @@ _log() { # level msg...
   local lvl="$1"; shift
   local line
   line="[$(_ts)] [$lvl] $*"
-  printf '%s\n' "$line"
+  # While the package-install gauge owns the screen (lib/progress.sh), a log
+  # line printed here would scribble straight over the whiptail box -- every
+  # module still calls log_info/log_warn freely, so this has to be silent
+  # there, not something each caller remembers to suppress. The line still
+  # always reaches the file: nothing is lost, only the live terminal echo.
+  [ "${MD_PROGRESS_ACTIVE:-0}" = 1 ] || printf '%s\n' "$line"
   # best-effort file log (may not be writable during --check)
   { printf '%s\n' "$line" >>"$MD_LOG"; } 2>/dev/null || true
 }
@@ -398,8 +403,31 @@ pkg_try() { # pkg...  -> 0/1, never aborts
   # apt branch was "scaffolding ... unreachable today", which stopped being
   # true once the Debian profile landed and would mislead anyone reading it.)
   if [ "$DRY_RUN" = 1 ]; then log_info "[dry-run] ${PKG_MGR:-dnf} install $*"; return 0; fi
+  # A lock held by the distro's OWN updater (apt-daily, unattended-upgrades,
+  # dnf-makecache/PackageKit) can appear MID-INSTALL, not just before the
+  # first package touch -- deploy.sh's single pkg_lock_wait call only covers
+  # the start of the run. Every pkg_try call re-checks, so a timer firing ten
+  # minutes in is drained the same VISIBLE way instead of falling through to
+  # apt's own silent DPkg::Lock::Timeout wait below (up to 600s with nothing
+  # on screen explaining it -- exactly what an ungauged wait looks like: hung).
+  if [ "${MD_PROGRESS_ACTIVE:-0}" = 1 ]; then
+    progress_note "Waiting for the system's own package updates to finish..."
+    pkg_lock_wait
+    progress_update "$MD_PROGRESS_LAST_PCT" "$MD_PROGRESS_LAST_LABEL"
+  else
+    pkg_lock_wait
+  fi
+  # While the gauge owns the screen, apt/dnf's own chatter must not fight it
+  # for the terminal -- it still reaches the install log in full, just not
+  # the screen. An --answers run has no gauge and keeps its output exactly as
+  # before (live, so an operator piping/logging the run still sees it all).
   case "$PKG_MGR" in
-    dnf) dnf -y install "$@" && return 0 ;;
+    dnf)
+      if [ "${MD_PROGRESS_ACTIVE:-0}" = 1 ]; then
+        dnf -y install "$@" >>"$MD_LOG" 2>&1 && return 0
+      else
+        dnf -y install "$@" && return 0
+      fi ;;
     # DPkg::Lock::Timeout is not optional politeness -- without it the FIRST
     # apt call on a freshly-provisioned Ubuntu box fails outright, because
     # unattended-upgrades runs on first boot and holds the dpkg frontend lock
@@ -426,7 +454,11 @@ pkg_try() { # pkg...  -> 0/1, never aborts
       if command -v debconf-set-selections >/dev/null 2>&1; then
         printf 'postfix postfix/main_mailer_type select No configuration\n' | debconf-set-selections 2>/dev/null || true
       fi
-      apt-get -y -o DPkg::Lock::Timeout="${APT_LOCK_WAIT:-600}" install "$@" && return 0 ;;
+      if [ "${MD_PROGRESS_ACTIVE:-0}" = 1 ]; then
+        apt-get -y -o DPkg::Lock::Timeout="${APT_LOCK_WAIT:-600}" install "$@" >>"$MD_LOG" 2>&1 && return 0
+      else
+        apt-get -y -o DPkg::Lock::Timeout="${APT_LOCK_WAIT:-600}" install "$@" && return 0
+      fi ;;
     *)   die "pkg_try: unknown or unset PKG_MGR '$PKG_MGR' -- os_detect must run before any pkg_install/pkg_try call" ;;
   esac
   log_warn "$PKG_MGR install failed: $*"; return 1

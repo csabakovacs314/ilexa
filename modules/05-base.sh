@@ -125,7 +125,13 @@ if [ "$PKG_MGR" = apt ]; then
   # index or it fails on a package that genuinely exists. Once per run, here,
   # since this is the first module that installs anything.
   # Lock timeout: see pkg_try() in lib/common.sh.
-  [ "$DRY_RUN" != 1 ] && apt-get -o DPkg::Lock::Timeout="${APT_LOCK_WAIT:-600}" update -qq
+if [ "$DRY_RUN" != 1 ]; then
+  if [ "${MD_PROGRESS_ACTIVE:-0}" = 1 ]; then
+    apt-get -o DPkg::Lock::Timeout="${APT_LOCK_WAIT:-600}" update -qq >>"$MD_LOG" 2>&1
+  else
+    apt-get -o DPkg::Lock::Timeout="${APT_LOCK_WAIT:-600}" update -qq
+  fi
+fi
   # rbldnsd/prometheus-node-exporter/whiptail live in universe on Ubuntu (all
   # confirmed via packages.ubuntu.com); most cloud images ship it enabled
   # already, but this is a no-op when it is, not a guess either way.
