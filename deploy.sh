@@ -382,17 +382,30 @@ installer."; then
   case " $extras " in *" mx_check "*) ENABLE_MX_CHECK=yes;; *) ENABLE_MX_CHECK=no;; esac
   case " $extras " in *" known_senders "*) ENABLE_KNOWN_SENDERS=yes;; *) ENABLE_KNOWN_SENDERS=no;; esac
   local hard
-  hard=$(tui_checklist "Hardening options (secure-by-default)" \
-    ssh    "SSH key-only + sudo admin user" on \
-    webmin "Webmin source-IP allowlist" on \
-    reboot "Kernel auto-reboot maintenance window" on \
-    smtp   "SMTP tuning (50M limit, delay_reject)" on \
-    selinux "SELinux enforcing (advanced)" off) || md_abort
+  local -a hard_args=(
+    ssh    "SSH key-only + sudo admin user" on
+    webmin "Webmin source-IP allowlist" on
+    reboot "Kernel auto-reboot maintenance window" on
+    smtp   "SMTP tuning (50M limit, delay_reject)" on
+  )
+  # SELinux is EL-only -- 85-hardening.sh already no-ops HARDEN_SELINUX=yes on
+  # Debian/Ubuntu with a warning ("SELinux is EL-only"), because the
+  # answers-file path can set it for any OS and that path must still fail
+  # safely. But the WIZARD offering it as a selectable item on every OS,
+  # including where it can only ever do nothing, is its own bug: reported live
+  # as "selinux is selectable on ubuntu 24, however it exists only on CentOS".
+  # Only add it to the list where it can actually do something.
+  [ "$PKG_MGR" = dnf ] && hard_args+=(selinux "SELinux enforcing (advanced)" off)
+  hard=$(tui_checklist "Hardening options (secure-by-default)" "${hard_args[@]}") || md_abort
   case " $hard " in *" ssh "*) HARDEN_SSH_KEYONLY=yes;; *) HARDEN_SSH_KEYONLY=no;; esac
   case " $hard " in *" webmin "*) HARDEN_WEBMIN=yes;; *) HARDEN_WEBMIN=no;; esac
   case " $hard " in *" reboot "*) HARDEN_KERNEL_AUTOREBOOT=yes;; *) HARDEN_KERNEL_AUTOREBOOT=no;; esac
   case " $hard " in *" smtp "*) HARDEN_SMTP_TUNING=yes;; *) HARDEN_SMTP_TUNING=no;; esac
-  case " $hard " in *" selinux "*) HARDEN_SELINUX=yes;; *) HARDEN_SELINUX=no;; esac
+  if [ "$PKG_MGR" = dnf ]; then
+    case " $hard " in *" selinux "*) HARDEN_SELINUX=yes;; *) HARDEN_SELINUX=no;; esac
+  else
+    HARDEN_SELINUX=no   # not offered on this OS; nothing to opt into
+  fi
 }
 
 apply_defaults() {
