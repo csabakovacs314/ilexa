@@ -410,10 +410,17 @@ pkg_try() { # pkg...  -> 0/1, never aborts
   # minutes in is drained the same VISIBLE way instead of falling through to
   # apt's own silent DPkg::Lock::Timeout wait below (up to 600s with nothing
   # on screen explaining it -- exactly what an ungauged wait looks like: hung).
-  if [ "${MD_PROGRESS_ACTIVE:-0}" = 1 ]; then
+  # command -v guards, not just the export -f in lib/progress.sh: a module
+  # subprocess that somehow lost the exported function (a shell that does not
+  # propagate BASH_FUNC_* env entries, or a future caller that sets
+  # MD_PROGRESS_ACTIVE without sourcing progress.sh at all) must degrade to
+  # "no gauge update" rather than aborting the whole install on a missing
+  # command -- exactly what happened live: "progress_note: command not found"
+  # took an otherwise-healthy pkg_try down with it.
+  if [ "${MD_PROGRESS_ACTIVE:-0}" = 1 ] && command -v progress_note >/dev/null 2>&1; then
     progress_note "Waiting for the system's own package updates to finish..."
     pkg_lock_wait
-    progress_update "$MD_PROGRESS_LAST_PCT" "$MD_PROGRESS_LAST_LABEL"
+    command -v progress_update >/dev/null 2>&1 && progress_update "$MD_PROGRESS_LAST_PCT" "$MD_PROGRESS_LAST_LABEL"
   else
     pkg_lock_wait
   fi

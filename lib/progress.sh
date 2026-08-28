@@ -31,6 +31,15 @@ export MD_PROGRESS_ACTIVE MD_PROGRESS_LAST_PCT MD_PROGRESS_LAST_LABEL
 # whether to redirect its own package output, and the last pct/label so a
 # transient message (e.g. "waiting for the system's own updates") can be
 # shown and then restored without the module having to invent new text.
+#
+# EXPORTING A VARIABLE DOES NOT EXPORT A FUNCTION. pkg_try (lib/common.sh) is
+# sourced by every module, runs as its own `bash "$m"` process, and calls
+# progress_note/progress_update when MD_PROGRESS_ACTIVE=1 -- but modules never
+# source THIS file, only common.sh. Without export -f those two names simply
+# do not exist in that process: "progress_note: command not found", live on a
+# real install, the exact env var/function inheritance mistake this session
+# already made once with a file descriptor. `export -f` is what actually
+# carries a function definition across fork/exec via the environment.
 
 progress_start() { # title
   _tui_ok || return 0
@@ -74,6 +83,11 @@ progress_note() {
   [ "$MD_PROGRESS_ACTIVE" = 1 ] || return 0
   progress_update "$MD_PROGRESS_LAST_PCT" "$1"
 }
+
+# Must cross into a module's own `bash "$m"` process (see the comment on
+# MD_PROGRESS_ACTIVE above) -- a plain function definition does not, only
+# `export -f` does.
+export -f progress_update progress_note
 
 progress_stop() {
   [ "$MD_PROGRESS_ACTIVE" = 1 ] || return 0
