@@ -1,8 +1,30 @@
 {
     "schema": 1,
-    "serial": 19,
+    "serial": 20,
     "channel": "stable",
     "releases": [
+        {
+            "version": "1.0.19",
+            "codename": "Duna",
+            "tag": "v1.0.19",
+            "released_at": "2026-08-31",
+            "commit": "a24af3a",
+            "severity": "fix",
+            "requires_installer": false,
+            "min_upgrade_from": "0.0.0",
+            "schema_version": {
+                "mysql": 1,
+                "iocs": 2,
+                "logins": 3
+            },
+            "app_tarball": {
+                "path": "assets/ilexa-app.tar.gz",
+                "sha256": "db3b7352d7ef82099c65f583a55a8250c97035ccac4d51799ee1fbe55269636e",
+                "size": 1951465
+            },
+            "notes_hu": "A \"Blokkolt levelek\" k\u00e1rtya DNSBL sz\u00e1ma jav\u00edtva: a csak figyelmeztet\u0151 (warn_if_reject) elutas\u00edt\u00e1sok eddig blokkol\u00e1sk\u00e9nt sz\u00e1m\u00edtottak, ami a hetes DNSBL \u00e9rt\u00e9ket jelent\u0151sen felnagy\u00edtotta. A list\u00e1nk\u00e9nti DNSBL bont\u00e1s megsz\u0171nt, mert a napl\u00f3 nem a val\u00f3di tal\u00e1latokat, hanem a leggyorsabban v\u00e1laszol\u00f3 list\u00e1t nevezte meg.",
+            "notes_en": "Fixes the DNSBL count on the \"Blocked mail\" card: warn-only (warn_if_reject) events were counted as blocks, substantially inflating the 7-day DNSBL figure. The per-list DNSBL breakdown is removed -- the log names whichever list replied first, not which ones actually matched."
+        },
         {
             "version": "1.0.18",
             "codename": "Duna",
@@ -356,6 +378,6 @@
             "notes_en": "Baseline release: version display, update checking, database migration framework."
         }
     ],
-    "latest": "1.0.18",
-    "generated_at": "2026-08-27T20:26:47Z"
+    "latest": "1.0.19",
+    "generated_at": "2026-08-31T22:05:04Z"
 }
