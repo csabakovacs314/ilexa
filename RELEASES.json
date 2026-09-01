@@ -1,8 +1,30 @@
 {
     "schema": 1,
-    "serial": 20,
+    "serial": 21,
     "channel": "stable",
     "releases": [
+        {
+            "version": "1.0.20",
+            "codename": "Duna",
+            "tag": "v1.0.20",
+            "released_at": "2026-09-01",
+            "commit": "f2cb748",
+            "severity": "feature",
+            "requires_installer": false,
+            "min_upgrade_from": "0.0.0",
+            "schema_version": {
+                "mysql": 1,
+                "iocs": 2,
+                "logins": 3
+            },
+            "app_tarball": {
+                "path": "assets/ilexa-app.tar.gz",
+                "sha256": "e49e80cfa03a88f7ba9c538a62c314ce34514cd19be8bfd8f60d96f56bc1fb83",
+                "size": 1952348
+            },
+            "notes_hu": "Az Adminisztr\u00e1ci\u00f3 oldal k\u00e1rty\u00e1i mostant\u00f3l \u00f6sszecsukhat\u00f3k, ugyan\u00fagy, mint a Rendszer oldalon: friss megnyit\u00e1skor minden z\u00e1rva, ment\u00e9s ut\u00e1n pedig az a k\u00e1rtya ny\u00edlik ki \u00fajra, amelyikben \u00e9ppen dolgozott.",
+            "notes_en": "The Admin page cards are now collapsible, matching the System page: everything is closed on a fresh visit, and saving a setting reopens the card you were working in instead of dumping you at the top."
+        },
         {
             "version": "1.0.19",
             "codename": "Duna",
@@ -378,6 +400,6 @@
             "notes_en": "Baseline release: version display, update checking, database migration framework."
         }
     ],
-    "latest": "1.0.19",
-    "generated_at": "2026-08-31T22:05:04Z"
+    "latest": "1.0.20",
+    "generated_at": "2026-09-01T05:52:33Z"
 }
