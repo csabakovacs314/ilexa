@@ -1,8 +1,16 @@
 #!/usr/bin/env bash
 # install.sh — one-command interactive bootstrap for the ilexa mail stack.
 #
-#   curl -fsSL https://raw.githubusercontent.com/csabakovacs314/ilexa/main/install.sh \
-#     | bash -s -- --fqdn mail.example.org
+#   curl -fsSL https://raw.githubusercontent.com/csabakovacs314/ilexa/main/install.sh | bash
+#
+# With no --fqdn and a terminal available, that runs the interactive WIZARD:
+# deploy.sh asks for the FQDN and everything else, shows a review screen, and
+# writes nothing until it is approved. Force it with --wizard.
+#
+# For an unattended install, name the host and every other value is derived
+# from it:
+#
+#   curl -fsSL .../install.sh | bash -s -- --fqdn mail.example.org
 #
 # Three phases, in order, and nothing is changed until the third:
 #
@@ -15,6 +23,7 @@
 #               backups and verification.
 #
 # Run "install.sh --check --fqdn <name>" to stop after phase 1.
+# --wizard and --fqdn are mutually exclusive: the wizard asks for the name.
 #
 # WARNING: run only on a FRESH host. deploy.sh overwrites /etc/postfix,
 # /etc/dovecot, web-server config and databases with templated defaults.
@@ -32,6 +41,7 @@ ANSWERS_OUT="${ILEXA_ANSWERS:-/root/answers.conf}"
 FQDN="" DOMAIN="" EMAIL="" TLS="auto"
 MODE="deploy"          # deploy | acceptance
 DRY_RUN=0 ASSUME_YES=0 CHECK_ONLY=0 FORCE=0 VERBOSE=0
+WIZARD=0               # 1 = hand the terminal to deploy.sh's interactive wizard
 
 FAILS=0 WARNS=0
 
@@ -122,6 +132,7 @@ while [ $# -gt 0 ]; do
         --email)  EMAIL="${2:-}"; shift 2 ;;
         --tls)    TLS="${2:-}"; shift 2 ;;
         --ref)    REF="${2:-}"; shift 2 ;;
+        --wizard)     WIZARD=1; shift ;;
         --check)      CHECK_ONLY=1; shift ;;
         --acceptance) MODE="acceptance"; shift ;;
         --dry-run)    DRY_RUN=1; shift ;;
@@ -182,19 +193,30 @@ fi
 # ── Identity ──────────────────────────────────────────────────────────────────
 # Prompt only when there is a real terminal. Under "curl | bash" stdin is the
 # script itself, so read from /dev/tty explicitly or not at all.
-if [ -z "$FQDN" ] && { true >/dev/tty; } 2>/dev/null; then
-    printf 'Mail server FQDN (e.g. mail.example.org): '
-    read -r FQDN < /dev/tty || true
+# No --fqdn and a terminal to talk to: run the WIZARD. deploy.sh already asks
+# for the FQDN and everything else this entry point would otherwise derive
+# from it, with validation, a review screen and an Abort that changes nothing.
+# Asking for one value here and defaulting the other twenty silently was the
+# worse half of both worlds.
+if [ -z "$FQDN" ] && [ "$WIZARD" = 0 ] && { true >/dev/tty; } 2>/dev/null; then
+    WIZARD=1
 fi
-[ -n "$FQDN" ] || die "--fqdn is required (no terminal available to prompt)"
+if [ "$WIZARD" = 1 ]; then
+    [ -z "$FQDN" ] || die "--wizard and --fqdn are mutually exclusive: the wizard asks for the FQDN itself"
+    [ "$MODE" = deploy ] || die "--acceptance runs unattended; it cannot be combined with the wizard"
+    { true >/dev/tty; } 2>/dev/null \
+        || die "the wizard needs a terminal. Non-interactive? pass --fqdn <name> to install unattended."
+else
+    [ -n "$FQDN" ] || die "--fqdn is required (no terminal available to prompt)"
 
-case "$FQDN" in *.*) : ;; *) die "--fqdn must be fully qualified, e.g. mail.example.org" ;; esac
-printf '%s' "$FQDN" | grep -qE '^[A-Za-z0-9]([A-Za-z0-9.-]*[A-Za-z0-9])?$' \
-    || die "--fqdn contains characters that are not valid in a hostname: $FQDN"
-[ "$FQDN" != "mail.example.com" ] || die "mail.example.com is the placeholder the installer refuses; use the real name"
+    case "$FQDN" in *.*) : ;; *) die "--fqdn must be fully qualified, e.g. mail.example.org" ;; esac
+    printf '%s' "$FQDN" | grep -qE '^[A-Za-z0-9]([A-Za-z0-9.-]*[A-Za-z0-9])?$' \
+        || die "--fqdn contains characters that are not valid in a hostname: $FQDN"
+    [ "$FQDN" != "mail.example.com" ] || die "mail.example.com is the placeholder the installer refuses; use the real name"
 
-[ -n "$DOMAIN" ] || DOMAIN="${FQDN#*.}"
-[ -n "$EMAIL" ]  || EMAIL="postmaster@${DOMAIN}"
+    [ -n "$DOMAIN" ] || DOMAIN="${FQDN#*.}"
+    [ -n "$EMAIL" ]  || EMAIL="postmaster@${DOMAIN}"
+fi
 
 # Resolve a name via DNS, deliberately NOT via getent: getent reads /etc/hosts
 # first, and this stack's own base module writes "127.0.0.1 <fqdn>" there, so a
@@ -274,7 +296,13 @@ else
     check "package system" ok "no lock held"
 fi
 
-# -- DNS, the part that decides whether TLS and mail actually work
+# -- DNS, the part that decides whether TLS and mail actually work.
+# Skipped in wizard mode: there is no name to look up until the operator types
+# one. deploy.sh runs its own DNS check afterwards, with an Exit/Skip/Retry
+# dialog, so nothing is lost -- it just happens a few screens later.
+if [ "$WIZARD" = 1 ]; then
+    check "DNS" warn "not checked yet" "the wizard asks for the FQDN, then deploy.sh checks it"
+else
 _mine=" $(hostname -I 2>/dev/null || true) "
 _a="$(_dns_a "$FQDN" | tr '\n' ' ' | sed 's/ $//')"
 _here=0
@@ -293,6 +321,7 @@ _ptr="$(command -v dig >/dev/null 2>&1 && dig +short -x "${_a%% *}" 2>/dev/null 
 [ -n "$_ptr" ] && check "DNS: PTR" ok "${_ptr%.}" \
     || check "DNS: PTR" warn "no reverse record" "most large providers reject mail from hosts without a PTR"
 
+fi
 # -- outbound 25: silently blocked by most cloud providers, and a mail server
 #    that cannot reach port 25 is useless. Worth knowing BEFORE installing.
 if command -v timeout >/dev/null 2>&1 && timeout 6 bash -c 'cat < /dev/null > /dev/tcp/gmail-smtp-in.l.google.com/25' 2>/dev/null; then
@@ -306,7 +335,11 @@ _t="$(command -v timedatectl >/dev/null 2>&1 && timedatectl show -p NTPSynchroni
 [ "$_t" = "yes" ] && check "clock sync" ok "NTP synchronised" \
     || check "clock sync" warn "not confirmed" "DKIM signatures and TLS are time-sensitive"
 
-# -- TLS decision, made from the DNS facts above
+# -- TLS decision, made from the DNS facts above. The wizard asks for TLS
+# itself, and there are no DNS facts to decide from before it has a name.
+if [ "$WIZARD" = 1 ]; then
+    check "TLS mode" ok "asked by the wizard"
+else
 case "$TLS" in
     letsencrypt|selfsigned) check "TLS mode" ok "$TLS (forced)" ;;
     auto)
@@ -316,6 +349,7 @@ case "$TLS" in
         fi ;;
     *) die "--tls must be letsencrypt, selfsigned or auto" ;;
 esac
+fi
 
 printf '\n  %d check(s) failed, %d warning(s)\n' "$FAILS" "$WARNS"
 
@@ -326,14 +360,16 @@ fi
 
 # ── Phase 2: PLAN ─────────────────────────────────────────────────────────────
 step "2/3  What will happen"
-banner "ilexa installer" "$FQDN" "domain $DOMAIN · admin $EMAIL · TLS $TLS"
+if [ "$WIZARD" = 1 ]; then
+    banner "ilexa installer" "interactive wizard" "the questions come next; nothing is written until you approve them"
+else
+    banner "ilexa installer" "$FQDN" "domain $DOMAIN · admin $EMAIL · TLS $TLS"
+fi
 cat <<PLAN
-  FQDN            $FQDN
-  Mail domain     $DOMAIN
-  Admin address   $EMAIL
-  TLS             $TLS
+$([ "$WIZARD" = 1 ] && printf '  FQDN            asked by the wizard\n  Mail domain     asked by the wizard\n  Admin address   asked by the wizard\n  TLS             asked by the wizard' \
+                    || printf '  FQDN            %s\n  Mail domain     %s\n  Admin address   %s\n  TLS             %s' "$FQDN" "$DOMAIN" "$EMAIL" "$TLS")
   Source          $SRC_DIR ($REF)
-  Answers         $ANSWERS_OUT
+  Answers         $([ "$WIZARD" = 1 ] && echo '(none — the wizard collects them)' || echo "$ANSWERS_OUT")
   Action          $([ "$DRY_RUN" = 1 ] && echo 'DRY RUN (no changes)' || echo "$MODE")
 
   Installs Postfix, Dovecot, rspamd, ClamAV, MariaDB, Apache, PostfixAdmin,
@@ -406,6 +442,9 @@ _set() { # key value
     if grep -qE "^${k}=" "$ANSWERS_OUT"; then sed -i "s|^${k}=.*|${k}=${esc}|" "$ANSWERS_OUT"
     else printf '%s=%s\n' "$k" "$v" >> "$ANSWERS_OUT"; fi
 }
+# The wizard collects every one of these itself, so writing an answers file
+# would only pre-empt the questions it is about to ask.
+if [ "$WIZARD" = 0 ]; then
 _set MAIL_FQDN "$FQDN"; _set PRIMARY_DOMAIN "$DOMAIN"
 _set ADMIN_EMAIL "$EMAIL"; _set ALERT_EMAIL "$EMAIL"
 _set TLS_MODE "$TLS"
@@ -418,14 +457,28 @@ _set TIMEZONE ""
 # webroot, not standalone: 50-web has already started the web server by the time
 # 75-tls-dns runs, so --standalone cannot bind :80 on a fresh install.
 [ "$TLS" = letsencrypt ] && _set CERTBOT_METHOD webroot
+fi
 
 cd "$SRC_DIR"
 TOTAL=$(ls modules/*.sh 2>/dev/null | wc -l)
 
 # Build the command without running it, so verbose and quiet share one definition.
-if [ "$DRY_RUN" = 1 ];        then CMD=(bash deploy.sh --dry-run --answers "$ANSWERS_OUT")
+if   [ "$WIZARD" = 1 ] && [ "$DRY_RUN" = 1 ]; then CMD=(bash deploy.sh --dry-run)
+elif [ "$WIZARD" = 1 ];        then CMD=(bash deploy.sh)
+elif [ "$DRY_RUN" = 1 ];        then CMD=(bash deploy.sh --dry-run --answers "$ANSWERS_OUT")
 elif [ "$MODE" = acceptance ]; then CMD=(bash ci/run-acceptance.sh "$ANSWERS_OUT")
 else                               CMD=(bash deploy.sh --answers "$ANSWERS_OUT")
+fi
+
+# The wizard owns the terminal: whiptail needs a real tty on stdin, and under
+# "curl | bash" stdin is the script. Redirect from /dev/tty and run deploy.sh
+# directly -- the quiet renderer below filters output line by line, which would
+# eat the dialogs whole.
+if [ "$WIZARD" = 1 ]; then
+    say "handing over to the wizard"
+    echo
+    "${CMD[@]}" < /dev/tty
+    exit $?
 fi
 
 if [ "$VERBOSE" = 1 ]; then
