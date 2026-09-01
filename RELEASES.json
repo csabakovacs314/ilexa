@@ -1,8 +1,30 @@
 {
     "schema": 1,
-    "serial": 21,
+    "serial": 22,
     "channel": "stable",
     "releases": [
+        {
+            "version": "1.0.21",
+            "codename": "Duna",
+            "tag": "v1.0.21",
+            "released_at": "2026-09-01",
+            "commit": "2552f09",
+            "severity": "feature",
+            "requires_installer": false,
+            "min_upgrade_from": "0.0.0",
+            "schema_version": {
+                "mysql": 1,
+                "iocs": 2,
+                "logins": 3
+            },
+            "app_tarball": {
+                "path": "assets/ilexa-app.tar.gz",
+                "sha256": "a377b0e6bc9abf962e0a4bc7a166d3758de6be95bbe9117f4ed61bff28509c68",
+                "size": 1953128
+            },
+            "notes_hu": "Az IOC \u00e9s a Kamp\u00e1nyok oldal tetej\u00e9n l\u00e9v\u0151 hossz\u00fa magyar\u00e1zat mostant\u00f3l \u00f6sszecsukhat\u00f3, \u00e9s alap\u00e9rtelmezetten z\u00e1rva van - ugyan\u00fagy, mint a Rendszer \u00e9s az Adminisztr\u00e1ci\u00f3 oldal szakaszai. \u00cdgy mindk\u00e9t oldal r\u00f6gt\u00f6n a t\u00e9nyleges tartalommal ny\u00edlik, a magyar\u00e1zat pedig egy kattint\u00e1ssal el\u00e9rhet\u0151 marad.",
+            "notes_en": "The long explanation at the top of the IOC and Campaigns pages is now collapsible and closed by default, matching the sections on the System and Admin pages. Both pages now open on their actual content, with the explanation still one click away."
+        },
         {
             "version": "1.0.20",
             "codename": "Duna",
@@ -400,6 +422,6 @@
             "notes_en": "Baseline release: version display, update checking, database migration framework."
         }
     ],
-    "latest": "1.0.20",
-    "generated_at": "2026-09-01T05:52:33Z"
+    "latest": "1.0.21",
+    "generated_at": "2026-09-01T06:51:49Z"
 }
