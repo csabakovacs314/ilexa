@@ -52,6 +52,18 @@ domains, and English + Hungarian lure phrases. **The rule is language-neutral
 by construction — adding a language is a new key in `brand_lures.json`, not a
 code change.** See `docs/GUIDE.md` (`ENABLE_HU_BRAND_GUARD`) for the details.
 
+## Screenshots
+
+The wizard that installs it, and the console you get:
+
+[![The ilexa console — Overview](docs/screenshots/console/01-overview.png)](docs/SCREENSHOTS.md)
+
+[![The installer wizard — review screen](docs/screenshots/installer/09-review.png)](docs/SCREENSHOTS.md)
+
+**[All 21 screenshots →](docs/SCREENSHOTS.md)** — ten console pages and eleven
+wizard screens. Every one is synthetic: `.example` domains and documentation IP
+ranges throughout, so nothing shown is a real host, mailbox or person.
+
 ## Usage
 
 ```bash
