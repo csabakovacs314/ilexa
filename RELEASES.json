@@ -1,8 +1,30 @@
 {
     "schema": 1,
-    "serial": 22,
+    "serial": 23,
     "channel": "stable",
     "releases": [
+        {
+            "version": "1.0.22",
+            "codename": "Duna",
+            "tag": "v1.0.22",
+            "released_at": "2026-09-01",
+            "commit": "d11dab7",
+            "severity": "feature",
+            "requires_installer": false,
+            "min_upgrade_from": "0.0.0",
+            "schema_version": {
+                "mysql": 1,
+                "iocs": 2,
+                "logins": 3
+            },
+            "app_tarball": {
+                "path": "assets/ilexa-app.tar.gz",
+                "sha256": "44c6ced9d3a639b546ea1b0a59d90ba642e90dc9c81ffd5aa4a3c462cc4d6584",
+                "size": 1957865
+            },
+            "notes_hu": "Az Arch\u00edvum, a Jelentett spam, a Blokkol\u00e1s \u00e9s a Feh\u00e9rlista oldal magyar\u00e1z\u00f3 fejl\u00e9ce mostant\u00f3l \u00f6sszecsukhat\u00f3 \u00e9s alap\u00e9rtelmezetten z\u00e1rva van, mint a t\u00f6bbi oldalon. Angol nyelv\u0171 konzolon 49 olyan sz\u00f6veg is jav\u00edtva lett, amely eddig magyarul jelent meg - k\u00f6zt\u00fck a keskeny k\u00e9perny\u0151n l\u00e1tsz\u00f3 oszlopfejl\u00e9cek, az audit CSV export fejl\u00e9ce \u00e9s a bejelentkez\u00e9si kock\u00e1zati indokok.",
+            "notes_en": "The explanation header on the Archive, Reported spam, Blocklist and Allowlist pages is now collapsible and closed by default, matching the other pages. On an English console, 49 strings that still rendered in Hungarian are fixed -- including the column headers shown on narrow screens, the audit CSV export header, and the sign-in risk reasons, which had no English at all."
+        },
         {
             "version": "1.0.21",
             "codename": "Duna",
@@ -422,6 +444,6 @@
             "notes_en": "Baseline release: version display, update checking, database migration framework."
         }
     ],
-    "latest": "1.0.21",
-    "generated_at": "2026-09-01T06:51:49Z"
+    "latest": "1.0.22",
+    "generated_at": "2026-09-01T17:28:59Z"
 }

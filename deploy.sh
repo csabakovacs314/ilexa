@@ -42,7 +42,11 @@ MD_PURPOSE="  Stands up a complete, hardened mail server on a FRESH host
   WARNING: fresh hosts only -- overwrites /etc/postfix,
   /etc/dovecot and databases with templated defaults."
 
-usage() { sed -n '2,12p' "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//'; }
+# Prints the comment header above, stopping at the first line that is not a
+# comment. The old form was a fixed `sed -n '2,12p'`, which ran two lines past
+# the header and printed "set -o pipefail" as if it were help text; a fixed
+# range also silently rots whenever the header grows or shrinks.
+usage() { awk 'NR>1 { if (!/^#/) exit; sub(/^# ?/, ""); print }' "${BASH_SOURCE[0]}"; }
 
 parse_args() {
   while [ $# -gt 0 ]; do
