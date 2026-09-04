@@ -89,6 +89,18 @@ findtime = 1d
 maxretry = 5
 EOF
 
+# The recidive jail above watches fail2ban's OWN log. fail2ban.conf points
+# logtarget at /var/log/fail2ban.log, but on a fresh host that file does not
+# exist until fail2ban has run once -- and fail2ban refuses to start at all
+# when a jail's logpath is missing: "Have not found any log file for recidive
+# jail", then exit 255. Chicken and egg, fatal on first boot. Seen on a fresh
+# AlmaLinux 10 install 2026-09-05; EL9's package happened to ship the file.
+# Creating it empty costs nothing and is what fail2ban would do itself.
+if [ "$DRY_RUN" != 1 ] && [ ! -e /var/log/fail2ban.log ]; then
+  install -m 0640 -o root -g root /dev/null /var/log/fail2ban.log
+  log_info "created /var/log/fail2ban.log (the recidive jail reads it; fail2ban will not start without it)"
+fi
+
 svc_enable fail2ban
 
 mark_done 65-fail2ban

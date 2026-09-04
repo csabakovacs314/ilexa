@@ -43,6 +43,23 @@ if [ "$DRY_RUN" != 1 ]; then
       opendkim-genkey -b 2048 -D "$kd" -d "$d" -s default || { log_warn "genkey failed for $d"; continue; }
     fi
     chown -R opendkim:opendkim "$kd"; chmod 600 "$kd/default.private"
+
+# opendkim.conf's PidFile lives in /run/opendkim, and on EL10 nothing creates
+# that directory: the package ships no tmpfiles.d entry and its unit has no
+# RuntimeDirectory=, so the daemon dies at startup with "smfi_opensocket()
+# failed" and 99-verify reports it as simply not running. opendmarc's unit does
+# create its own, which is why only DKIM broke. Seen on a fresh AlmaLinux 10
+# install 2026-09-05.
+#
+# Written as tmpfiles.d rather than a bare mkdir so it survives a reboot, and
+# guarded on the directory actually being absent so EL9/Debian -- where the
+# packaging already handles it -- are left alone.
+if [ "$DRY_RUN" != 1 ] && [ ! -d /run/opendkim ]; then
+  printf 'd /run/opendkim 0755 opendkim opendkim -\n' > /etc/tmpfiles.d/ilexa-opendkim.conf
+  systemd-tmpfiles --create /etc/tmpfiles.d/ilexa-opendkim.conf >/dev/null 2>&1 \
+    || install -d -m 0755 -o opendkim -g opendkim /run/opendkim
+  log_info "created /run/opendkim (the packaged unit does not, and opendkim cannot start without it)"
+fi
     echo "default._domainkey.$d $d:default:$kd/default.private" >> /etc/opendkim/KeyTable
     echo "*@$d default._domainkey.$d" >> /etc/opendkim/SigningTable
     { echo "; ===== DKIM DNS record for $d ====="; cat "$kd/default.txt" 2>/dev/null; echo; } >> "$DNS_OUT"
