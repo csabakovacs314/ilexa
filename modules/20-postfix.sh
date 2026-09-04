@@ -199,11 +199,11 @@ if [ "$DRY_RUN" != 1 ]; then
     printf '# Sender-identity guard exceptions: <sender-address> <sasl-username>.\n# For senders the alias model cannot express (addresses in unhosted domains).\n# Several owners: comma-separate them.\n#\n# IMPORTANT -- a LOCAL mailbox listed here must name ITSELF first:\n#   foo@example.org\tfoo@example.org,delegate@example.org\n# smtpd_sender_login_maps checks this hash map BEFORE the mysql map and stops\n# at the first answer, so a key present here shadows the mysql lookup that\n# normally grants an address ownership of itself. Listing only the delegate\n# silently revokes the mailbox owner right to send as itself -- observed for\n# real on the reference host 2026-09-01, ten days after the entry was added.\n# Addresses in UNHOSTED domains have no login to name, so they list only the\n# authenticated accounts allowed to use them.\n#\n# Run `postmap /etc/postfix/sender_login_exceptions` after every edit.\n' \
       > /etc/postfix/sender_login_exceptions
   fi
-  postmap /etc/postfix/sender_login_exceptions
+  postmap "$(postfix_map_type):/etc/postfix/sender_login_exceptions"
 fi
 
 if [ "$DRY_RUN" != 1 ]; then
-  postmap /etc/postfix/transport
+  postmap "$(postfix_map_type):/etc/postfix/transport"
   postfix set-permissions >/dev/null 2>&1 || true
   postfix check || die "postfix check failed"
 

@@ -246,7 +246,7 @@ if ! grep -q "^rspamlearn-spam@${route_dom}" /etc/postfix/transport; then
   printf '%s\t%s\n' "rspamlearn-spam@${route_dom}" "rspamreport-spam:" >> /etc/postfix/transport
   printf '%s\t%s\n' "rspamlearn-ham@${route_dom}"  "rspamreport-ham:"  >> /etc/postfix/transport
 fi
-postmap /etc/postfix/transport
+postmap "$(postfix_map_type):/etc/postfix/transport"
 
 # --- alias rows: spam@/ham@ in every mail domain ----------------------------
 seeded=0; skipped=0
