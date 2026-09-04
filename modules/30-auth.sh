@@ -61,6 +61,16 @@ if [ "$DRY_RUN" != 1 ]; then
     echo "*@$d default._domainkey.$d" >> /etc/opendkim/SigningTable
     { echo "; ===== DKIM DNS record for $d ====="; cat "$kd/default.txt" 2>/dev/null; echo; } >> "$DNS_OUT"
   done
+  # Explicit ownership/mode: these were created by ": >" and so inherited
+  # root's umask, which is 027 on EL10 -> root:root 0640, unreadable by the
+  # opendkim user the daemon drops to. opendkim then exits 78/CONFIG with
+  # "dkimf_db_open(): Permission denied" and 99-verify reports only "service
+  # not running". EL9/Debian's 022 umask made them 0644 and it worked by
+  # accident. They hold key PATHS, not key material, so the daemon's own
+  # user owning them at 0640 is both sufficient and tighter than 0644.
+  chown opendkim:opendkim /etc/opendkim/KeyTable /etc/opendkim/SigningTable 2>/dev/null || true
+  chmod 0640 /etc/opendkim/KeyTable /etc/opendkim/SigningTable 2>/dev/null || true
+
   log_info "DKIM public-key DNS records written to $DNS_OUT"
 else
   log_info "[dry-run] would generate DKIM keys for: $ALLDOMAINS"
