@@ -103,6 +103,19 @@ fi
 # Detected AFTER postfix is installed, since it asks postfix itself.
 MD_VAR_POSTFIX_MAP_TYPE="$(postfix_map_type)"; export MD_VAR_POSTFIX_MAP_TYPE
 log_info "postfix lookup-table type: $MD_VAR_POSTFIX_MAP_TYPE"
+
+# REPORT_AUTH_CHECK and REPORT_AUTH_ONLY are assembled in deploy.sh's defaults
+# phase -- long before postfix is installed -- so they cannot ask postconf and
+# they hardcode "hash:". Re-point them at the detected type now that postconf
+# can answer, or main.cf ends up mixing lmdb: maps with hash: restriction
+# classes and smtpd logs "unsupported dictionary type" on every lookup.
+for _k in REPORT_AUTH_CHECK REPORT_AUTH_ONLY; do
+  _v="${!_k-}"
+  case "$_v" in
+    *hash:*) setvar "$_k" "${_v//hash:/${MD_VAR_POSTFIX_MAP_TYPE}:}" ;;
+  esac
+done
+unset _k _v
 render "$MD_TEMPLATES/postfix/main.cf.tmpl"   /etc/postfix/main.cf
 
 if [ "$DRY_RUN" != 1 ] && [ -n "$_prev_always_bcc" ]; then
