@@ -431,6 +431,15 @@ fi
 [ -f "$SRC_DIR/deploy.sh" ] || die "$SRC_DIR/deploy.sh missing — repository layout unexpected"
 say "ilexa $(sed -n 's/.*"latest": "\([^"]*\)".*/\1/p' "$SRC_DIR/RELEASES.json" 2>/dev/null || echo unknown) in $SRC_DIR"
 
+# In wizard mode nothing is written here at all. deploy.sh collects every
+# answer interactively and records the effective set to
+# /var/lib/ilexa-install/answers.effective afterwards. Copying the CI base
+# profile over /root/answers.conf regardless left a file full of
+# example.com placeholders that nothing ever corrected -- and a later
+# `deploy.sh --only <module> --answers /root/answers.conf` would then
+# happily deploy the placeholder domain. It also made the plan screen's
+# "Answers  (none -- the wizard collects them)" a lie.
+if [ "$WIZARD" = 0 ]; then
 say "writing $ANSWERS_OUT ..."
 BASE="$SRC_DIR/ci/answers.compat.conf"
 [ -f "$BASE" ] || die "$BASE missing"
@@ -442,9 +451,6 @@ _set() { # key value
     if grep -qE "^${k}=" "$ANSWERS_OUT"; then sed -i "s|^${k}=.*|${k}=${esc}|" "$ANSWERS_OUT"
     else printf '%s=%s\n' "$k" "$v" >> "$ANSWERS_OUT"; fi
 }
-# The wizard collects every one of these itself, so writing an answers file
-# would only pre-empt the questions it is about to ask.
-if [ "$WIZARD" = 0 ]; then
 _set MAIL_FQDN "$FQDN"; _set PRIMARY_DOMAIN "$DOMAIN"
 _set ADMIN_EMAIL "$EMAIL"; _set ALERT_EMAIL "$EMAIL"
 _set TLS_MODE "$TLS"

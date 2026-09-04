@@ -50,8 +50,8 @@ tls_random_source = dev:/dev/urandom
 append_dot_mydomain = no
 data_directory = /var/lib/postfix
 
-alias_maps = hash:/etc/aliases
-alias_database = hash:/etc/aliases
+alias_maps = @@POSTFIX_MAP_TYPE@@:/etc/aliases
+alias_database = @@POSTFIX_MAP_TYPE@@:/etc/aliases
 
 relayhost =
 relay_domains = $mydestination
@@ -62,7 +62,7 @@ recipient_delimiter = +
 inet_interfaces = all
 inet_protocols = @@INET_PROTOCOLS@@
 
-transport_maps = hash:/etc/postfix/transport
+transport_maps = @@POSTFIX_MAP_TYPE@@:/etc/postfix/transport
 
 # --- rate limiting ---
 anvil_rate_time_unit = 60s
@@ -234,7 +234,7 @@ resolve_dequoted_address = no
 # Edit the file, `postmap` it, done -- smtpd processes are short-lived, so
 # new connections pick up the rebuilt .db without a reload.
 smtpd_sender_login_maps =
-    hash:/etc/postfix/sender_login_exceptions
+    @@POSTFIX_MAP_TYPE@@:/etc/postfix/sender_login_exceptions
     proxy:mysql:/etc/postfix/sql/mysql-email2email.cf
     proxy:mysql:/etc/postfix/sql/mysql-sender-login-alias.cf
 

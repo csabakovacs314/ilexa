@@ -170,8 +170,8 @@ report_msg='550 5.7.1 Report addresses accept authenticated submissions only. Us
   done
 } > /etc/postfix/report_deny
 chmod 0644 /etc/postfix/report_auth /etc/postfix/report_deny
-postmap hash:/etc/postfix/report_auth
-postmap hash:/etc/postfix/report_deny
+postmap "$(postfix_map_type):/etc/postfix/report_auth"
+postmap "$(postfix_map_type):/etc/postfix/report_deny"
 
 # main.cf is rendered by 20-postfix from templates/postfix/main.cf.tmpl, which
 # now carries BOTH the restriction class and the check itself
@@ -195,8 +195,8 @@ case "$_rr" in
   *)
     log_info "repairing pre-template host: adding the report-address auth check to main.cf"
     postconf -e "smtpd_restriction_classes = report_auth_only"
-    postconf -e "report_auth_only = permit_mynetworks, permit_sasl_authenticated, check_recipient_access hash:/etc/postfix/report_deny"
-    postconf -e "smtpd_recipient_restrictions = check_recipient_access hash:/etc/postfix/report_auth, $_rr" ;;
+    postconf -e "report_auth_only = permit_mynetworks, permit_sasl_authenticated, check_recipient_access $(postfix_map_type):/etc/postfix/report_deny"
+    postconf -e "smtpd_recipient_restrictions = check_recipient_access $(postfix_map_type):/etc/postfix/report_auth, $_rr" ;;
 esac
 
 install -d -m 0755 /etc/cron.d

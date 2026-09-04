@@ -60,6 +60,43 @@ gpgcheck=1
 gpgkey=https://rspamd.com/rpm-stable/gpg.key
 EOF
   fi
+
+  # rspamd.com signs its RPMs with a key whose self-signature uses SHA-1
+  # (digest algo 2, key from 2015). EL10 replaced rpm's OpenPGP parser with
+  # rpm-sequoia, which rejects that outright -- "Policy rejects ...: No
+  # binding signature" -- and unlike EL9 there is no SHA1.pmod, so
+  # `update-crypto-policies --set DEFAULT:SHA1` fails with "file SHA1.pmod not
+  # found". EPEL 10 carries no rspamd either, so upstream's repo is the only
+  # source and the package genuinely cannot be verified on that platform.
+  # Observed on a real AlmaLinux 10.1 install 2026-09-05.
+  #
+  # Fail by default rather than quietly dropping signature checking. The
+  # operator can opt in with RSPAMD_ALLOW_UNSIGNED=yes, which disables gpgcheck
+  # for THIS repo only, is logged loudly, and is reported in the run summary.
+  if [ "$DRY_RUN" != 1 ] && command -v rpm >/dev/null 2>&1; then
+    _rk=$(mktemp) || _rk=""
+    if [ -n "$_rk" ] && curl -sSfL --max-time 30 https://rspamd.com/rpm-stable/gpg.key -o "$_rk" 2>/dev/null \
+       && ! rpm --import "$_rk" >/dev/null 2>&1; then
+      if [ "${RSPAMD_ALLOW_UNSIGNED:-no}" = yes ]; then
+        log_warn "rspamd GPG key REJECTED by this platform; RSPAMD_ALLOW_UNSIGNED=yes -> installing rspamd WITHOUT signature verification"
+        log_warn "  the package is still fetched over HTTPS, but its authenticity is NOT verified"
+        sed -i 's/^gpgcheck=1/gpgcheck=0/' /etc/yum.repos.d/rspamd.repo
+      else
+        rm -f "$_rk"
+        die "rspamd's signing key cannot be imported on this platform (SHA-1 self-signature,
+       rejected by rpm-sequoia; no SHA1 crypto-policy module exists here).
+       rspamd is not in EPEL, so upstream's repo is the only source.
+
+       Either wait for rspamd upstream to re-sign its key, or accept the risk
+       explicitly by re-running with RSPAMD_ALLOW_UNSIGNED=yes -- which turns
+       gpgcheck OFF for the rspamd repo only:
+
+         RSPAMD_ALLOW_UNSIGNED=yes bash deploy.sh --answers /root/answers.conf
+         (or add RSPAMD_ALLOW_UNSIGNED=yes to the answers file)"
+      fi
+    fi
+    [ -n "$_rk" ] && rm -f "$_rk"
+  fi
 fi
 pkg_install rspamd "${REDIS_PKG:-redis}"
 

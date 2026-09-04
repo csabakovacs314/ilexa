@@ -441,6 +441,9 @@ apply_defaults() {
   # Every updater is installed regardless; a blank key just leaves that source
   # disabled, changeable later from ilexa -> Admin.
   : "${ENABLE_FEEDS:=no}"
+  # Opt-in escape hatch for platforms where rspamd's upstream signing key
+  # cannot be imported (EL10 / rpm-sequoia). Default no = fail loudly.
+  : "${RSPAMD_ALLOW_UNSIGNED:=no}"
   : "${ENABLE_BREACH_CHECK:=no}"
   : "${ENABLE_FTS_OPTIMIZE:=yes}"
   : "${ENABLE_ARCHIVE:=no}"
@@ -650,6 +653,7 @@ validate() {
 
 export_config() {
   # export answer vars for module subprocesses
+  export RSPAMD_ALLOW_UNSIGNED
   export MAIL_FQDN MAIL_HOSTNAME PRIMARY_DOMAIN EXTRA_DOMAINS ADMIN_EMAIL ALERT_EMAIL ADMIN_PASSWORD PFA_ADMIN_PASSWORD \
     MAIL_STORE TLS_MODE CERTBOT_METHOD TLS_CUSTOM_CERT TLS_CUSTOM_KEY GEOBLOCK_COUNTRIES \
     ENABLE_OTX OTX_API_KEY OTX_TRUSTED_CIDRS SPAMHAUS_DQS_KEY ABUSIX_API_KEY ENABLE_LAST_LOGIN ENABLE_FTS_XAPIAN ENABLE_UNATTENDED \
@@ -723,6 +727,7 @@ Geoblock:        $GEOBLOCK_COUNTRIES
 OTX suite:       $ENABLE_OTX
 Spamhaus DQS:    $([ -n "${SPAMHAUS_DQS_KEY:-}" ] && echo yes || echo no)
 Abusix:          $([ -n "${ABUSIX_API_KEY:-}" ] && echo "yes (remember to allowlist this server IP in the Abusix portal)" || echo no)
+rspamd signature: $([ "${RSPAMD_ALLOW_UNSIGNED:-no}" = yes ] && echo 'NOT VERIFIED (RSPAMD_ALLOW_UNSIGNED=yes)' || echo verified)
 Extras:          last_login=$ENABLE_LAST_LOGIN fts_xapian=$ENABLE_FTS_XAPIAN unattended=$ENABLE_UNATTENDED mx_check=$ENABLE_MX_CHECK known_senders=$ENABLE_KNOWN_SENDERS
 Hardening:       ssh=$HARDEN_SSH_KEYONLY webmin=$HARDEN_WEBMIN reboot=$HARDEN_KERNEL_AUTOREBOOT smtp=$HARDEN_SMTP_TUNING selinux=$HARDEN_SELINUX
 Backups target:  ${BACKUP_TARGET:-(none / parameterized)}

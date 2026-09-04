@@ -347,6 +347,27 @@ load_secrets() { # source all saved secrets into the current shell
 # ---- template rendering ----------------------------------------------------
 # render TEMPLATE DEST  — substitutes @@KEY@@ from exported MD_VAR_<KEY> env.
 # Uses sed (NOT envsubst) so native $shell/$postfix/$dovecot vars are preserved.
+# Which Postfix lookup-table type this build actually supports.
+#
+# EL10 dropped Berkeley DB entirely: `postconf -m` there lists lmdb but NOT
+# hash or btree, there is no postfix-hash package to add it back, and every
+# `postmap hash:...` fails with "unsupported dictionary type: hash". EL9 and
+# Debian still have hash. Detected from postconf rather than keyed to the OS
+# version, so this stays correct if a platform adds or drops a type later --
+# and so a wrong guess shows up as a missing type rather than a broken map.
+#
+# Falls back to hash when postconf cannot be run (postfix not installed yet),
+# which is only ever the pre-install case where nothing is postmapped anyway.
+postfix_map_type() {
+  local types
+  types=" $(postconf -m 2>/dev/null | tr '\n' ' ') "
+  case "$types" in
+    *" hash "*) printf 'hash\n' ;;
+    *" lmdb "*) printf 'lmdb\n' ;;
+    *)          printf 'hash\n' ;;
+  esac
+}
+
 render() {
   local tmpl="$1" dest="$2"
   [ -r "$tmpl" ] || die "template not found: $tmpl"

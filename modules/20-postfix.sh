@@ -94,12 +94,15 @@ if [ "${ENABLE_REPORT_ADDRESSES:-yes}" = yes ] && [ "$DRY_RUN" != 1 ]; then
       printf '# placeholder created by 20-postfix; populated by 58-report-learn\n' \
         > "/etc/postfix/$_m"
       chmod 0644 "/etc/postfix/$_m"
-      postmap "hash:/etc/postfix/$_m"
+      postmap "$(postfix_map_type):/etc/postfix/$_m"
       log_info "created empty /etc/postfix/$_m so main.cf can reference it before 58 runs"
     fi
   done
 fi
 
+# Detected AFTER postfix is installed, since it asks postfix itself.
+MD_VAR_POSTFIX_MAP_TYPE="$(postfix_map_type)"; export MD_VAR_POSTFIX_MAP_TYPE
+log_info "postfix lookup-table type: $MD_VAR_POSTFIX_MAP_TYPE"
 render "$MD_TEMPLATES/postfix/main.cf.tmpl"   /etc/postfix/main.cf
 
 if [ "$DRY_RUN" != 1 ] && [ -n "$_prev_always_bcc" ]; then
