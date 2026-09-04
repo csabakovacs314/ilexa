@@ -62,7 +62,7 @@ WWW=/var/www/html
 # a version or a GitHub archive tarball is re-generated. Roundcube uses a stable
 # release asset; the GitHub *archive* hashes (PA/MW) can drift — mismatch fails
 # closed (app skipped) with a clear message so you can re-pin deliberately.
-PA_VER=4.0.1;  PA_SHA256="${PA_SHA256:-41e096d37f4531af0f0ee63d2288facf0be4c834ff4d2fceca54682c2a7ed113}"
+PA_VER=4.0.5;  PA_SHA256="${PA_SHA256:-4dd769eb93b2a1812f80376d95887c7cd86cf6f27b9a1035c32082ceac105dda}"
 RC_VER=1.6.9;  RC_SHA256="${RC_SHA256:-b61a5f5c22f890c299e935aacfcf0870676990d8aebff0d6cdff075bf17cef4f}"
 
 # server-level security headers (no global cookie_secure)
@@ -251,10 +251,17 @@ deploy_postfixadmin() {
     # vendor/ tree, not just an assumption. ext-sqlite3 also isn't even
     # packaged for EL9 at all (dnf has no matching package), so requiring
     # it for real would make PostfixAdmin permanently uninstallable there.
-    if COMPOSER_ALLOW_SUPERUSER=1 composer install --no-dev --optimize-autoloader --no-interaction \
-         --working-dir="$dir" >/dev/null 2>&1; then
+    _co=$(COMPOSER_ALLOW_SUPERUSER=1 composer install --no-dev --optimize-autoloader --no-interaction \
+         --working-dir="$dir" 2>&1); _crc=$?
+    if [ "$_crc" = 0 ]; then
       log_info "composer dependencies installed for PostfixAdmin"
     else
+      # Log WHY. Discarding this cost a long diagnosis on EL10: composer 2.10
+      # refuses packages with published advisories, PostfixAdmin 4.0.1 pinned
+      # spomky-labs/otphp ^10.0 whose every release is flagged, and all the
+      # operator saw was "will not function". Older composer (Ubuntu 24's
+      # 2.7.1) has no such policy, which is why it only showed up on EL.
+      printf '%s\n' "$_co" | tail -20 | while IFS= read -r _l; do log_warn "  composer: $_l"; done
       log_warn "composer install failed in $dir — PostfixAdmin will not function until it's re-run"
     fi
   fi
@@ -348,8 +355,12 @@ deploy_postfixadmin() {
   [ "$DRY_RUN" != 1 ] && install -m 0644 -o root -g root \
     "$MD_ASSETS/web/postfixadmin-ilexa.css" "$dir/public/css/ilexa.css"
   if [ "$DRY_RUN" != 1 ] && [ -f "$dir/public/upgrade.php" ]; then
-    sudo -u "$WEB_USER" php "$dir/public/upgrade.php" >/dev/null 2>&1 && log_info "PostfixAdmin schema applied" \
-      || log_warn "PostfixAdmin schema step needs manual run (public/upgrade.php)"
+    _up=$(sudo -u "$WEB_USER" php "$dir/public/upgrade.php" 2>&1); _urc=$?
+    if [ "$_urc" = 0 ]; then log_info "PostfixAdmin schema applied"
+    else
+      printf '%s\n' "$_up" | tail -12 | while IFS= read -r _l; do log_warn "  upgrade.php: $_l"; done
+      log_warn "PostfixAdmin schema step needs manual run (public/upgrade.php)"
+    fi
   fi
 
   # Column-level SELECT grants for the read-only Postfix maps user (created
