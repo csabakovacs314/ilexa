@@ -4,6 +4,18 @@ source "$MD_ROOT/lib/common.sh"
 step_guard 30-auth || exit 0
 
 pkg_install opendkim opendmarc
+# opendkim-genkey is bundled in the opendkim package on EL9 and Debian, but
+# EL10 split it into opendkim-tools. Without it the key loop below silently
+# `continue`s for every domain: no keys, an empty KeyTable and SigningTable,
+# and opendkim then refuses to start ("dkimf_db_open(): Permission denied" on
+# the empty table) -- reported by 99-verify only as "service not running".
+# Asked by capability, not by OS version, and optional because the package
+# does not exist where genkey is already bundled.
+if ! command -v opendkim-genkey >/dev/null 2>&1; then
+  pkg_install_optional opendkim-tools
+  command -v opendkim-genkey >/dev/null 2>&1 \
+    || log_warn "opendkim-genkey is still missing -- DKIM keys cannot be generated and mail will NOT be signed"
+fi
 
 ALLDOMAINS="$PRIMARY_DOMAIN${EXTRA_DOMAINS:+ $EXTRA_DOMAINS}"
 
@@ -27,22 +39,6 @@ UMask                   022
 UserID                  opendkim:opendkim
 EOF
 
-# opendkim.conf's PidFile lives in /run/opendkim, and on EL10 nothing creates
-# that directory: the package ships no tmpfiles.d entry and its unit has no
-# RuntimeDirectory=, so the daemon dies at startup with "smfi_opensocket()
-# failed" and 99-verify reports it as simply not running. opendmarc's unit does
-# create its own, which is why only DKIM broke. Seen on a fresh AlmaLinux 10
-# install 2026-09-05.
-#
-# Written as tmpfiles.d rather than a bare mkdir so it survives a reboot, and
-# guarded on the directory actually being absent so EL9/Debian -- where the
-# packaging already handles it -- are left alone.
-if [ "$DRY_RUN" != 1 ] && [ ! -d /run/opendkim ]; then
-  printf 'd /run/opendkim 0755 opendkim opendkim -\n' > /etc/tmpfiles.d/ilexa-opendkim.conf
-  systemd-tmpfiles --create /etc/tmpfiles.d/ilexa-opendkim.conf >/dev/null 2>&1 \
-    || install -d -m 0755 -o opendkim -g opendkim /run/opendkim
-  log_info "created /run/opendkim (the packaged unit does not, and opendkim cannot start without it)"
-fi
 
 # --- TrustedHosts / KeyTable / SigningTable + per-domain keys ---
 { echo "127.0.0.1"; echo "::1"; for d in $ALLDOMAINS; do echo ".$d"; done; } \
