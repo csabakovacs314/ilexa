@@ -701,7 +701,11 @@ save_answers() {
              HARDEN_SMTP_TUNING HARDEN_SELINUX; do
       v="${!k-}"
       [ -n "${!k+x}" ] || continue
-      printf '%s=%s\n' "$k" "$v"
+      # Single-quoted, with embedded quotes escaped: this file is SOURCED, so an
+      # unquoted multi-word value both truncates and executes. GEOBLOCK_COUNTRIES="ru
+      # cn br kr" set the variable to "ru" and ran "cn br kr" as a command --
+      # geoblock silently dropped to one country on every re-run from this file.
+      printf "%s='%s'\n" "$k" "${v//\'/\'\\\'\'}"
     done
   } > "$out"
   chmod 0600 "$out"; chown root:root "$out"
