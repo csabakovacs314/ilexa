@@ -514,6 +514,29 @@ pkg_install() { # pkg...  -> aborts the run on failure
   pkg_try "$@" || die "$PKG_MGR install failed: $*"
 }
 
+# Best-effort packages: try each one, and carry on -- loudly -- if the platform
+# does not have it. For extensions whose absence genuinely does not break the
+# stack, where hard-failing the whole install would be the wrong trade.
+#
+# EL10 is the case that forced this: php-imap is gone there (PHP's IMAP
+# extension is deprecated upstream and unpackaged on EL10, and not in EPEL),
+# which killed 50-web outright. Nothing in this stack calls imap_* -- Roundcube
+# ships its own IMAP client and the console never touches the extension -- so
+# the right behaviour is to note it and continue, not to abort.
+#
+# Installed one at a time on purpose: a single dnf/apt call with a missing name
+# in it fails the whole transaction, taking the available packages down with it.
+pkg_install_optional() { # pkg...
+  local p
+  for p in "$@"; do
+    if pkg_try "$p" >/dev/null 2>&1; then
+      log_info "optional package installed: $p"
+    else
+      log_warn "optional package not available on this platform, continuing without it: $p"
+    fi
+  done
+}
+
 # Wait for a package manager ALREADY RUNNING on the host before we touch it.
 # A freshly booted cloud image starts unattended updates within minutes of
 # first boot (Ubuntu: apt-daily/apt-daily-upgrade -> unattended-upgrade;

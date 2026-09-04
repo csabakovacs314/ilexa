@@ -13,7 +13,8 @@ if [ "$PKG_MGR" = apt ]; then
   # pdo_sqlite extensions bundled inside php-pdo, which is why this was invisible
   # there; Debian splits SQLite into its own package that nothing else pulls in.
   pkg_install apache2 \
-    php-fpm php-mysql php-sqlite3 php-mbstring php-xml php-json php-gd php-intl php-imap php-ldap php-zip
+    php-fpm php-mysql php-sqlite3 php-mbstring php-xml php-json php-gd php-intl php-ldap php-zip
+  pkg_install_optional php-imap
   # mod_ssl is bundled into apache2's core package on Debian (no separate
   # package the way EL has one), but it -- along with rewrite/headers/
   # proxy_fcgi -- ships disabled and needs explicit a2enmod, unlike EL's
@@ -51,7 +52,8 @@ else
   # dependency of something else -- named explicitly so it cannot silently drop
   # out of the dependency chain.
   pkg_install httpd mod_ssl \
-    php php-fpm php-pdo php-mysqlnd php-mbstring php-xml php-json php-gd php-intl php-imap php-ldap php-zip
+    php php-fpm php-pdo php-mysqlnd php-mbstring php-xml php-json php-gd php-intl php-ldap php-zip
+  pkg_install_optional php-imap
 fi
 svc_enable "$WEB_SVC"
 
