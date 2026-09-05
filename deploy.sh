@@ -286,6 +286,34 @@ Spamhaus, Abusix and others, queried live per message."; then
       "AbuseIPDB API key (blank = install disabled, set later in ilexa):") || md_abort
   else ENABLE_FEEDS=no; fi
 
+  # rspamd's signing key cannot be imported on some platforms (EL10). Ask
+  # rather than dying 12 minutes later inside 40-rspamd: the wizard is the
+  # default path now, and RSPAMD_ALLOW_UNSIGNED was otherwise reachable only
+  # from an answers file, which a one-liner user does not have.
+  if ! rspamd_key_importable; then
+    tui_msg "rspamd package signature" \
+"This system REFUSES rspamd's package signing key.
+
+rspamd.com signs with a key whose self-signature uses SHA-1. This
+platform's rpm rejects that outright, and offers no way to re-enable
+it. rspamd is not in EPEL either, so this repository is the only
+source -- there is no signed alternative to fall back to.
+
+Continuing means installing rspamd WITHOUT verifying its signature.
+It is still fetched over HTTPS from rspamd.com, but its authenticity
+is not checked. Nothing else in the install is affected.
+
+Declining stops here, with nothing changed."
+    if tui_yesno "Install rspamd without verifying its signature?
+
+No = stop now and change nothing."; then
+      RSPAMD_ALLOW_UNSIGNED=yes
+      log_warn "operator accepted UNVERIFIED rspamd packages (RSPAMD_ALLOW_UNSIGNED=yes)"
+    else
+      md_abort
+    fi
+  fi
+
   # Opt-in, and the operator sees what it means first. This copies the content
   # of everyone's mail into one admin-readable mailbox.
   #
@@ -710,6 +738,27 @@ save_answers() {
   } > "$out"
   chmod 0600 "$out"; chown root:root "$out"
   log_info "answers recorded in $out (no secrets) — usable with --answers for a later --only run"
+}
+
+# Can this platform import rspamd's repo signing key at all?
+#
+# Probed into a THROWAWAY rpm database, so nothing is imported into the real
+# one before the review screen has been approved. Returns 0 when the key is
+# usable (or when this is not an rpm platform, or the probe cannot run -- an
+# inconclusive probe must not invent a scary question).
+#
+# EL10 is where this bites: rspamd signs with a SHA-1 self-signature that
+# rpm-sequoia rejects, and there is no SHA1.pmod to re-enable it.
+rspamd_key_importable() {
+  command -v rpm >/dev/null 2>&1 || return 0
+  local d rc=0
+  d=$(mktemp -d 2>/dev/null) || return 0
+  if curl -sSfL --max-time 20 https://rspamd.com/rpm-stable/gpg.key -o "$d/key" 2>/dev/null; then
+    rpm --dbpath "$d/db" --initdb >/dev/null 2>&1 || { rm -rf "$d"; return 0; }
+    rpm --dbpath "$d/db" --import "$d/key" >/dev/null 2>&1 || rc=1
+  fi
+  rm -rf "$d"
+  return $rc
 }
 
 summary_text() {
