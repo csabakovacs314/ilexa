@@ -49,6 +49,15 @@ dirty=""
 # host. If a future file in the app repo starts carrying live site values the
 # same way, exclude it here too rather than sanitizing after the fact.
 #
+# .claude/ is excluded for the same reason, and it was NOT until 1.0.23: the
+# directory held Claude Code's local settings plus a stale git worktree, and
+# those 419 files were HALF the published bundle -- a duplicate copy of the app
+# source shipped to every host and unpacked into /opt/ilexa-src. No credentials
+# leaked (config.php is excluded by basename, which caught the worktree copy
+# too, and the tree held no literal secrets), but internal scratch has no
+# business in a public artifact. Found by noticing the bundle contained two
+# VERSION files.
+#
 # .superpowers/ and docs/ are excluded because tar does not honor .gitignore:
 # those directories hold this repo's SDD execution scratch (ledgers, task
 # briefs, review packages) and design specs/plans, never meant to leave the
@@ -66,6 +75,7 @@ tar -czf "$OUT" -C "$SRC" \
   --exclude='.git' --exclude='__pycache__' --exclude='*.bak-*' \
   --exclude='config.php' \
   --exclude='.superpowers' --exclude='docs' \
+  --exclude='.claude' \
   .
 printf '%s\n' "$commit" > "$STAMP"
 

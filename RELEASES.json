@@ -1,8 +1,30 @@
 {
     "schema": 1,
-    "serial": 24,
+    "serial": 25,
     "channel": "stable",
     "releases": [
+        {
+            "version": "1.0.24",
+            "codename": "Duna",
+            "tag": "v1.0.24",
+            "released_at": "2026-09-05",
+            "commit": "c84af7b",
+            "severity": "fix",
+            "requires_installer": false,
+            "min_upgrade_from": "0.0.0",
+            "schema_version": {
+                "mysql": 1,
+                "iocs": 2,
+                "logins": 3
+            },
+            "app_tarball": {
+                "path": "assets/ilexa-app.tar.gz",
+                "sha256": "caadd2ccf4aada6917784244d8a1e4191b59d0a0188f5b7a53da662a8243d3dd",
+                "size": 1951312
+            },
+            "notes_hu": "Karbantart\u00e1si kiad\u00e1s: a telep\u00edt\u0151csomagb\u00f3l kimaradnak a fejleszt\u0151i seg\u00e9df\u00e1jlok, amelyek eddig a csomag fel\u00e9t tett\u00e9k ki \u00e9s minden g\u00e9pre felker\u00fcltek. Jelsz\u00f3 vagy m\u00e1s titok nem ker\u00fclt ki. Tartalmazza az 1.0.23 angol alapnyelv-jav\u00edt\u00e1s\u00e1t is.",
+            "notes_en": "Housekeeping release: the app bundle no longer carries internal development scratch, which was half its file count and was unpacked on every host. No credentials were ever exposed. Includes 1.0.23s English-default fix."
+        },
         {
             "version": "1.0.23",
             "codename": "Duna",
@@ -466,6 +488,6 @@
             "notes_en": "Baseline release: version display, update checking, database migration framework."
         }
     ],
-    "latest": "1.0.23",
-    "generated_at": "2026-09-05T01:44:10Z"
+    "latest": "1.0.24",
+    "generated_at": "2026-09-05T01:49:39Z"
 }

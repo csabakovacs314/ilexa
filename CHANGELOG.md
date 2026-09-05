@@ -3,6 +3,11 @@
 Console releases, newest first. Generated from `RELEASES.json` by
 `tools/gen-changelog.py` -- edit the notes there, not here.
 
+## 1.0.24 (Duna) — 2026-09-05
+`fix`
+
+Housekeeping release: the app bundle no longer carries internal development scratch, which was half its file count and was unpacked on every host. No credentials were ever exposed. Includes 1.0.23s English-default fix.
+
 ## 1.0.23 (Duna) — 2026-09-05
 `fix`
 
