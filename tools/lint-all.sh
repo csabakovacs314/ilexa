@@ -149,6 +149,17 @@ elif [ "$quiet" != 1 ]; then
   echo "$rs_out" | tail -1
 fi
 
+# CHANGELOG.md's release section is generated from RELEASES.json. Cutting a
+# release updates the manifest, so without this the changelog silently falls a
+# version behind and nobody notices until someone reads it.
+cl_out="$(python3 "$HERE/tools/gen-changelog.py" --check 2>&1)"; cl_rc=$?
+if [ "$cl_rc" != 0 ]; then
+  echo "$cl_out"
+  fail=1
+elif [ "$quiet" != 1 ]; then
+  echo "$cl_out" | tail -1
+fi
+
 echo "lint-all: ${#files[@]} scripts checked -- $syntax_fail syntax errors, $sc_errors shellcheck errors, $sc_warnings shellcheck warnings, $path_fail missing paths"
 
 [ "$fail" = 1 ] && exit 1

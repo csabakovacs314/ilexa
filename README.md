@@ -66,6 +66,22 @@ ranges throughout, so nothing shown is a real host, mailbox or person.
 
 ## Usage
 
+One command on a fresh host — with no `--fqdn` it runs the interactive wizard,
+which asks for the hostname and everything else and writes nothing until you
+approve the review screen:
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/csabakovacs314/ilexa/main/install.sh | bash
+```
+
+Naming the host instead installs unattended, deriving every other value from it:
+
+```bash
+curl -fsSL .../install.sh | bash -s -- --fqdn mail.example.org
+```
+
+From a clone:
+
 ```bash
 sudo ./deploy.sh                      # interactive whiptail wizard
 sudo ./deploy.sh --answers my.conf    # unattended (see answers.example.conf)
@@ -116,7 +132,7 @@ ci/                    acceptance runner + answer files for disposable test VMs
 |---|---|
 | AlmaLinux/Rocky/RHEL 9 | Verified against a live production host |
 | Ubuntu 24.04 LTS | Real-host-verified: every module executed end-to-end on a live box, including real mail send/receive |
-| AlmaLinux/Rocky/RHEL 10 | Repoquery-grade: validated against real AlmaLinux 10 repo metadata, never executed on an EL10 host |
+| AlmaLinux/Rocky/RHEL 10 | Real-host-verified on AlmaLinux 10.1 (2026-09-05): full wizard install, `Checks failed: 0`, console 401 behind a real Let's Encrypt certificate. **One caveat:** rspamd's upstream signing key is SHA-1 and EL10's rpm-sequoia rejects it, with no `SHA1.pmod` to re-enable it — so rspamd needs `RSPAMD_ALLOW_UNSIGNED=yes`. See [EL10 platform notes](docs/GUIDE.md#el10-platform-notes) |
 | Ubuntu 22.04 / 26.04 LTS | Share the 24.04 code path (`os_profile_debian()`), extrapolated, not independently verified |
 
 Every release is static-verified: `shellcheck` clean across all scripts, every

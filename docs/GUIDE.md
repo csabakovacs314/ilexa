@@ -66,6 +66,39 @@ answers, and strong DB passwords are generated per run.
   databases, firewalld zones, etc. with templated defaults. Do **not** run this
   on a server that already carries mail you care about.
 
+### EL10 platform notes
+
+AlmaLinux/Rocky/RHEL 10 differ from EL9 in ways that are invisible until a real
+install runs. All of these are handled automatically; they are documented
+because they change what you see in the log, and one of them needs a decision
+from you.
+
+- **rspamd cannot be signature-verified — needs an explicit opt-in.**
+  rspamd.com signs its RPMs with a key whose self-signature uses SHA-1. EL10
+  replaced rpm's OpenPGP parser with `rpm-sequoia`, which rejects it (*"Policy
+  rejects …: No binding signature"*), and unlike EL9 there is **no `SHA1.pmod`**,
+  so `update-crypto-policies --set DEFAULT:SHA1` fails outright. rspamd is not
+  in EPEL, so upstream's repo is the only source. The installer therefore
+  **fails by default** with that explanation rather than a bare dnf error. Set
+  `RSPAMD_ALLOW_UNSIGNED=yes` to proceed: `gpgcheck` goes off for the rspamd
+  repo only, the package still arrives over HTTPS, and the review summary says
+  `rspamd signature: NOT VERIFIED`. This is an upstream problem — recheck when
+  rspamd re-signs its key.
+- **Postfix lookup tables are `lmdb`, not `hash`.** Berkeley DB is gone from
+  EL10 entirely and there is no `postfix-hash` package. The installer asks
+  `postconf -m` what the build supports and renders `lmdb:` accordingly, so
+  `main.cf` on EL10 reads `lmdb:/etc/aliases` where EL9 reads `hash:`.
+- **`opendkim-genkey` lives in `opendkim-tools`**, not in `opendkim`. Installed
+  automatically; without it no DKIM keys are generated and opendkim will not
+  start.
+- **`php-imap` does not exist** on EL10 and is not in EPEL. It is installed
+  best-effort and skipped with a warning — nothing in this stack uses the
+  extension (Roundcube ships its own IMAP client).
+- **Root's umask is 027.** Files created without an explicit mode come out
+  `0640`, which is why the DKIM tables are chowned and chmodded explicitly.
+- **SELinux** is offered in the hardening checklist but left unticked by
+  default, and has not been verified in enforcing mode on EL10.
+
 ### Hardware (minimums / recommended)
 - **RAM:** 2 GB minimum; **4 GB+ recommended.** rspamd + ClamAV + fts_xapian
   are memory-hungry. If under ~2 GB total (RAM+swap) the deployer adds a 2 GB
@@ -125,6 +158,20 @@ block is written into `/root/mail-deploy-dns-extra.txt`, and you finish with:
 ---
 
 ## 3. Running the deployer
+
+Fastest path on a fresh host — no clone, no flags. With no `--fqdn` the
+bootstrap hands over to the wizard, which asks for the hostname and everything
+else, and writes nothing until the review screen is approved:
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/csabakovacs314/ilexa/main/install.sh | bash
+```
+
+Pass `--fqdn <name>` instead and the same script installs unattended, deriving
+the domain, admin address and TLS mode from it. `--wizard` forces the
+interactive path; the two are mutually exclusive.
+
+From a clone:
 
 ```bash
 git clone <this repo> mail-deploy && cd mail-deploy
@@ -209,6 +256,7 @@ These are the keys in `answers.example.conf` (and the questions the wizard asks)
 | `SPAM_REWRITE_SUBJECT` | Score at which the subject gets tagged | `6` |
 | `SPAM_REJECT` | Safety-net reject threshold; also arms the ClamAV virus reject | `15` |
 | `SPAM_SUBJECT_TAG` | Subject prefix applied at the rewrite threshold | `{Spam?}` |
+| `RSPAMD_ALLOW_UNSIGNED` | Install rspamd even when its upstream GPG key cannot be verified on this platform. `yes` turns `gpgcheck` off **for the rspamd repo only**, logs the decision, and reports it in the review summary as `rspamd signature: NOT VERIFIED`. Needed on EL10 — see [EL10 platform notes](#el10-platform-notes) | `no` |
 | `ENABLE_MX_CHECK` | Probe the envelope-from domain's MX (rspamd `mx_check`; uses the module's own built-in symbol scores, fails open if outbound :25 is blocked) | `yes` |
 | `ENABLE_KNOWN_SENDERS` | Per-sender reputation for freemail domains, where domain reputation is meaningless; needs accumulated history before its symbols fire | `yes` |
 | `ENABLE_HU_BRAND_GUARD` | Brand-impersonation guard, two layers. Exact: a From display-name claiming a known Hungarian brand from a foreign domain scores +5 (`HU_BRAND_SPOOF`). Fuzzy: a Lua rule in `lua.local.d/brand_guard.lua` (`BRAND_DN_SPOOF`, +2.5) additionally catches lookalikes — `0TP`, Cyrillic `ОТР`, accent tricks — via transliteration, homoglyph folding and edit-distance 1; when both fire, the `HU_BRAND_STRONG` composite merges them into a single +5.5. The same Lua rule also scores a brand name in the Subject (`BRAND_SUBJ_SPOOF` +1, or `BRAND_SUBJ_OBFUS` +3 when the mention is disguised with homoglyphs/digits), in the From localpart (`BRAND_ADDR_SPOOF` +1), and classic phishing lure wording alongside any of those (`BRAND_LURE` +2 — never on its own, since "please verify your account" is also what a genuine password reset says). The rule is language-neutral: it folds case, accents, homoglyphs and lookalike digits, so Hungarian and English are handled by the same code and the language lives entirely in the data — `local.d/brand_lures.json` ships English and Hungarian phrase lists and takes further languages as new keys. Brands, name variants and real domains live in `local.d/brand_definitions.json` (seeded with 16 Hungarian + 30 international brands: PayPal, Amazon, Microsoft, DHL, Booking.com, …; dictionary-word brand names like Visa/Apple/Meta use `=`-prefixed whole-name-only variants to avoid false positives) — standing config seeded once and then managed from the console (Rendszer → Márkavédelem) or `qa-brand-guard.sh`; the toggle only affects the first seed (`"enabled"` in the JSON is the live switch). The universal `PHISH_ON_TRUSTED` composite (phishing via whitelisted infra loses its whitelist bonuses) installs regardless | `yes` |
