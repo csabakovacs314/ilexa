@@ -3,6 +3,11 @@
 Console releases, newest first. Generated from `RELEASES.json` by
 `tools/gen-changelog.py` -- edit the notes there, not here.
 
+## 1.0.23 (Duna) — 2026-09-05
+`fix`
+
+A console that has never had a language chosen now starts in English instead of Hungarian; hosts with an explicit choice already on disk are unaffected. This release also carries the installer work behind AlmaLinux 10 support — 12 fixes, and a wizard that now completes end-to-end on EL10.
+
 ## 1.0.22 (Duna) — 2026-09-01
 `feature`
 

@@ -1,8 +1,30 @@
 {
     "schema": 1,
-    "serial": 23,
+    "serial": 24,
     "channel": "stable",
     "releases": [
+        {
+            "version": "1.0.23",
+            "codename": "Duna",
+            "tag": "v1.0.23",
+            "released_at": "2026-09-05",
+            "commit": "8a8eaea",
+            "severity": "fix",
+            "requires_installer": false,
+            "min_upgrade_from": "0.0.0",
+            "schema_version": {
+                "mysql": 1,
+                "iocs": 2,
+                "logins": 3
+            },
+            "app_tarball": {
+                "path": "assets/ilexa-app.tar.gz",
+                "sha256": "d5b758ac05b5fbb5d7e2fca52c98c080569fa9a48a2dfd39c3470d5bd128268b",
+                "size": 3915510
+            },
+            "notes_hu": "Az a konzol, amelyen m\u00e9g soha nem v\u00e1lasztottak nyelvet, mostant\u00f3l angolul indul magyar helyett. Akin\u00e9l a nyelv m\u00e1r be van \u00e1ll\u00edtva, ott semmi nem v\u00e1ltozik. Ez a kiad\u00e1s emellett a telep\u00edt\u0151 AlmaLinux 10 t\u00e1mogat\u00e1s\u00e1t is elhozza: 12 hiba jav\u00edtva, a var\u00e1zsl\u00f3 pedig v\u00e9gig lefut EL10-en.",
+            "notes_en": "A console that has never had a language chosen now starts in English instead of Hungarian; hosts with an explicit choice already on disk are unaffected. This release also carries the installer work behind AlmaLinux 10 support \u2014 12 fixes, and a wizard that now completes end-to-end on EL10."
+        },
         {
             "version": "1.0.22",
             "codename": "Duna",
@@ -444,6 +466,6 @@
             "notes_en": "Baseline release: version display, update checking, database migration framework."
         }
     ],
-    "latest": "1.0.22",
-    "generated_at": "2026-09-01T17:28:59Z"
+    "latest": "1.0.23",
+    "generated_at": "2026-09-05T01:44:10Z"
 }
