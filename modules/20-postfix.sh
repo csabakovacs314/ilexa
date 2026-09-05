@@ -113,6 +113,19 @@ if [ "${ENABLE_REPORT_ADDRESSES:-yes}" = yes ] && [ "$DRY_RUN" != 1 ]; then
 fi
 
 # Detected AFTER postfix is installed, since it asks postfix itself.
+# PCRE maps: EL9 builds pcre support into postfix, EL10 split it into
+# postfix-pcre exactly as it did with hash. Without it, header_checks is
+# "unavailable" and cleanup rejects EVERY message at end-of-DATA with
+# 451 4.3.0 "queue file write error" -- the server looks healthy, every service
+# runs, and no mail is accepted. Asked of postfix rather than keyed to the
+# version, so EL9 (where it is built in) is a no-op.
+if ! postconf -m 2>/dev/null | grep -qx pcre; then
+  log_info "pcre map support missing -- installing postfix-pcre"
+  pkg_install_optional postfix-pcre
+  postconf -m 2>/dev/null | grep -qx pcre \
+    || log_warn "postfix still has no pcre map support -- header_checks will fail and mail will be deferred"
+fi
+
 MD_VAR_POSTFIX_MAP_TYPE="$(postfix_map_type)"; export MD_VAR_POSTFIX_MAP_TYPE
 MD_VAR_POSTFIX_CACHE_MAP_TYPE="$(postfix_cache_map_type)"; export MD_VAR_POSTFIX_CACHE_MAP_TYPE
 log_info "postfix lookup-table type: $MD_VAR_POSTFIX_MAP_TYPE (cache: $MD_VAR_POSTFIX_CACHE_MAP_TYPE)"
