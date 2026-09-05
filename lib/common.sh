@@ -368,6 +368,21 @@ postfix_map_type() {
   esac
 }
 
+# postscreen's cache is a SEPARATE choice from the lookup tables: it wants a
+# map type that supports in-place updates, which on EL9 means btree. EL10 has
+# neither hash nor btree, so it must be lmdb there -- and a btree cache on EL10
+# fails softly, logging "could not update entry" per connection while postscreen
+# silently re-tests every client forever.
+postfix_cache_map_type() {
+  local types
+  types=" $(postconf -m 2>/dev/null | tr '\n' ' ') "
+  case "$types" in
+    *" btree "*) printf 'btree\n' ;;
+    *" lmdb "*)  printf 'lmdb\n' ;;
+    *)           printf 'btree\n' ;;
+  esac
+}
+
 render() {
   local tmpl="$1" dest="$2"
   [ -r "$tmpl" ] || die "template not found: $tmpl"

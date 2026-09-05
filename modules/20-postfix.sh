@@ -25,7 +25,19 @@ if [ "$PKG_MGR" = apt ]; then
   POLICYD_SPF_BIN=/usr/bin/policyd-spf
 else
   pkg_install postfix postfix-mysql pypolicyd-spf
-  POLICYD_SPF_USER=policyd-spf
+  # EL9's pypolicyd-spf creates a "policyd-spf" system user; EL10's package
+  # creates "pyspf-milter" instead. master.cf spawns the policy service as
+  # this user, and naming one that does not exist is not a soft failure: the
+  # spawn dies with "unknown user name", check_policy_service then fails, and
+  # postfix answers EVERY RCPT with 451 4.3.5 "Server configuration problem" --
+  # the server takes no mail at all. Found by sending one real message to a
+  # fresh AlmaLinux 10 install 2026-09-05; every service was "running".
+  POLICYD_SPF_USER=""
+  for _u in policyd-spf pyspf-milter nobody; do
+    if getent passwd "$_u" >/dev/null 2>&1; then POLICYD_SPF_USER="$_u"; break; fi
+  done
+  [ -n "$POLICYD_SPF_USER" ] || die "no user for the SPF policy service -- pypolicyd-spf created none of: policyd-spf pyspf-milter nobody"
+  log_info "SPF policy service will run as: $POLICYD_SPF_USER"
   POLICYD_SPF_BIN=/usr/libexec/postfix/policyd-spf
 fi
 
@@ -102,7 +114,8 @@ fi
 
 # Detected AFTER postfix is installed, since it asks postfix itself.
 MD_VAR_POSTFIX_MAP_TYPE="$(postfix_map_type)"; export MD_VAR_POSTFIX_MAP_TYPE
-log_info "postfix lookup-table type: $MD_VAR_POSTFIX_MAP_TYPE"
+MD_VAR_POSTFIX_CACHE_MAP_TYPE="$(postfix_cache_map_type)"; export MD_VAR_POSTFIX_CACHE_MAP_TYPE
+log_info "postfix lookup-table type: $MD_VAR_POSTFIX_MAP_TYPE (cache: $MD_VAR_POSTFIX_CACHE_MAP_TYPE)"
 
 # REPORT_AUTH_CHECK and REPORT_AUTH_ONLY are assembled in deploy.sh's defaults
 # phase -- long before postfix is installed -- so they cannot ask postconf and

@@ -293,5 +293,5 @@ postscreen_greet_action       = enforce
 postscreen_dnsbl_action       = enforce
 postscreen_dnsbl_threshold    = @@PSDNSBL_THRESHOLD@@
 postscreen_dnsbl_sites = @@POSTSCREEN_DNSBL_SITES@@
-postscreen_cache_map          = btree:/var/lib/postfix/postscreen_cache
+postscreen_cache_map          = @@POSTFIX_CACHE_MAP_TYPE@@:/var/lib/postfix/postscreen_cache
 postscreen_cache_retention_time = 7d
