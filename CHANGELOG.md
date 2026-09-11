@@ -3,6 +3,11 @@
 Console releases, newest first. Generated from `RELEASES.json` by
 `tools/gen-changelog.py` -- edit the notes there, not here.
 
+## 1.0.25 (Tisza) — 2026-09-11
+`security`
+
+A firewalld reload no longer silently disarms every active Fail2Ban ban.
+
 ## 1.0.24 (Duna) — 2026-09-05
 `fix`
 

@@ -40,7 +40,7 @@ if [ "$DRY_RUN" != 1 ]; then
   if [ -n "$METRICS_SCRAPE_CIDR" ]; then
     firewall-cmd --permanent --zone=public \
       --add-rich-rule="rule family=ipv4 source address=${METRICS_SCRAPE_CIDR} port port=9100 protocol=tcp accept" >/dev/null 2>&1 \
-      && firewall-cmd --reload >/dev/null 2>&1 || log_warn "could not add firewalld rule for 9100"
+      && firewalld_reload >/dev/null 2>&1 || log_warn "could not add firewalld rule for 9100"
     log_info "node_exporter on ${bind}:9100, scrape allowed from $METRICS_SCRAPE_CIDR"
   else
     log_info "node_exporter on 127.0.0.1:9100 (scrape via SSH tunnel)"

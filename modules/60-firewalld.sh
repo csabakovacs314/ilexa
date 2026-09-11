@@ -151,10 +151,10 @@ render "$MD_TEMPLATES/firewalld/load-countries.sh.tmpl" /usr/local/sbin/load-cou
 [ "$DRY_RUN" != 1 ] && install -m 755 "$MD_ASSETS/otx/update-geoip.sh" /usr/bin/update-geoip.sh
 
 if [ "$DRY_RUN" != 1 ]; then
-  firewall-cmd --reload >/dev/null 2>&1 || log_warn "firewall-cmd reload failed (check zone/ipset XML)"
+  firewalld_reload >/dev/null 2>&1 || log_warn "firewall-cmd reload failed (check zone/ipset XML)"
   log_info "populating geoblock ipset (first run may take a moment)"
   /usr/local/sbin/load-countries.sh || log_warn "geoblock initial load failed (retry later)"
-  firewall-cmd --reload >/dev/null 2>&1 || true
+  firewalld_reload >/dev/null 2>&1 || true
 fi
 
 mark_done 60-firewalld

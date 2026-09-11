@@ -118,7 +118,7 @@ if [ "$DRY_RUN" != 1 ]; then
       /usr/local/sbin/load-otx-uri.sh  || log_warn "initial OTX URI load failed"
     fi
     /usr/bin/otx-rbldnsd-sync.sh || log_warn "initial rbldnsd sync failed"
-    firewall-cmd --reload >/dev/null 2>&1 || true
+    firewalld_reload >/dev/null 2>&1 || true
   fi
 fi
 

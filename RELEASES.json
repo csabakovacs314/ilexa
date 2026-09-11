@@ -1,8 +1,30 @@
 {
     "schema": 1,
-    "serial": 25,
+    "serial": 26,
     "channel": "stable",
     "releases": [
+        {
+            "version": "1.0.25",
+            "codename": "Tisza",
+            "tag": "v1.0.25",
+            "released_at": "2026-09-11",
+            "commit": "aaeba6d",
+            "severity": "security",
+            "requires_installer": false,
+            "min_upgrade_from": "0.0.0",
+            "schema_version": {
+                "mysql": 1,
+                "iocs": 2,
+                "logins": 3
+            },
+            "app_tarball": {
+                "path": "assets/ilexa-app.tar.gz",
+                "sha256": "a9051df4b11106faeb9abd7d7fe9ab59033afe7d5e6c131f76fd1c9966ae5c98",
+                "size": 1951822
+            },
+            "notes_hu": "A firewalld \u00fajrat\u00f6lt\u00e9se t\u00f6bb\u00e9 nem kapcsolja ki n\u00e9m\u00e1n a Fail2Ban tilt\u00e1sait.",
+            "notes_en": "A firewalld reload no longer silently disarms every active Fail2Ban ban."
+        },
         {
             "version": "1.0.24",
             "codename": "Duna",
@@ -488,6 +510,6 @@
             "notes_en": "Baseline release: version display, update checking, database migration framework."
         }
     ],
-    "latest": "1.0.24",
-    "generated_at": "2026-09-05T01:49:39Z"
+    "latest": "1.0.25",
+    "generated_at": "2026-09-11T06:59:07Z"
 }

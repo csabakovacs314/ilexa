@@ -740,3 +740,22 @@ write_file() {
   [ -n "$owner" ] && chown "$owner" "$path"
   log_info "wrote $path"
 }
+
+# firewalld_reload -- reload firewalld without silently disarming Fail2Ban.
+#
+# A firewalld reload discards every *runtime* rich rule, and Fail2Ban's bans
+# are runtime rich rules. Fail2Ban keeps the ban in its own database, so it
+# neither re-applies the rule nor notices it is gone: the host stops enforcing
+# every active ban, and the eventual unban fails with
+# "NOT_ENABLED ... not in 'public'". /usr/local/sbin/firewalld-reload.sh
+# reloads and then re-asserts the bans. It ships as a helpers.list entry, so
+# 55-ilexa installs it (and the console's one-click update delivers it to
+# existing hosts) before this module runs -- but fall back to a plain reload
+# so a module run in isolation, or a host without the console, still works.
+firewalld_reload() {
+  if [ -x /usr/local/sbin/firewalld-reload.sh ]; then
+    /usr/local/sbin/firewalld-reload.sh
+  else
+    firewall-cmd --reload
+  fi
+}
