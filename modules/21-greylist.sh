@@ -106,7 +106,22 @@ fi
 # "Southwest Airlines (unique sender, no retry)".
 #
 # Scope: greylisting only. rspamd still scores, tags and rejects this mail as
-# before, so this is not a spam whitelist. Entries are APPENDED if absent rather
+# before, so this is not a spam whitelist.
+#
+# Brevo (sp*-brevo.net, sender-sib.com) fails the same way by a different
+# route. Its envelope sender IS stable, so the triplet could be learned — but it
+# rotates a shared sending pool, so the client IP changes on every retry and the
+# triplet resets. Observed on the reference host: one message re-deferred 12
+# times without ever passing. Greylisting was not delaying that sender's mail,
+# it was blocking it. Its bulk mail does score into rspamd's rewrite-subject
+# band, which is a deliberate, operator-made trade: tagged mail delivered beats
+# wanted mail silently stuck.
+#
+# Note the entry FORM for Brevo. A bare "brevo.net" does not match
+# shared-p100-i30.d.sp1-brevo.net, because postgrey anchors on a label boundary
+# and the label there is "sp1-brevo" — hence the regex, which the packaged list
+# also uses for several providers. Verified against the live policy service,
+# including that "notbrevo.net" and "sp1-brevo.net.evil.example" still greylist. Entries are APPENDED if absent rather
 # than written wholesale, so an operator's own .local additions survive a re-run
 # and the module stays idempotent.
 GREY_WL=/etc/postfix/postgrey_whitelist_clients.local
@@ -122,6 +137,8 @@ sparkpostmail.com
 mxout.mta3.net
 xqueue.com
 mailgun.net
+/\\.sp\\d+-brevo\\.net$/
+sender-sib.com
 "
 
 if [ ! -e "$GREY_WL" ]; then
