@@ -3,6 +3,11 @@
 Console releases, newest first. Generated from `RELEASES.json` by
 `tools/gen-changelog.py` -- edit the notes there, not here.
 
+## 1.0.26 (Tisza) — 2026-09-29
+`fix` · **requires a full installer run**
+
+Installer-side fixes. Forwarded mail now passes SPF (SRS), and mail from bulk providers — Amazon SES, Mailchimp, Brevo and others — is no longer held up by greylisting; for Brevo it was not a delay but an outright block. No console code changed, so re-run the installer to pick these up.
+
 ## 1.0.25 (Tisza) — 2026-09-11
 `security`
 

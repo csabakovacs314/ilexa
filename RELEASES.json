@@ -1,8 +1,30 @@
 {
     "schema": 1,
-    "serial": 26,
+    "serial": 27,
     "channel": "stable",
     "releases": [
+        {
+            "version": "1.0.26",
+            "codename": "Tisza",
+            "tag": "v1.0.26",
+            "released_at": "2026-09-29",
+            "commit": "6dde789",
+            "severity": "fix",
+            "requires_installer": true,
+            "min_upgrade_from": "0.0.0",
+            "schema_version": {
+                "mysql": 1,
+                "iocs": 2,
+                "logins": 3
+            },
+            "app_tarball": {
+                "path": "assets/ilexa-app.tar.gz",
+                "sha256": "30cb21235b39e77f1a83b8434cb1a40b782f41982bb41e95081b9956eeea1970",
+                "size": 1951824
+            },
+            "notes_hu": "Telep\u00edt\u0151oldali jav\u00edt\u00e1sok. A tov\u00e1bb\u00edtott levelek \u00e1tmennek az SPF-ellen\u0151rz\u00e9sen (SRS), \u00e9s a t\u00f6meges k\u00fcld\u0151k \u2014 Amazon SES, Mailchimp, Brevo \u00e9s t\u00e1rsaik \u2014 levelei nem akadnak fenn a greylistingen; a Brevo eset\u00e9ben ez nem k\u00e9sleltet\u00e9st, hanem t\u00e9nyleges elakad\u00e1st jelentett. A konzol k\u00f3dja v\u00e1ltozatlan, ez\u00e9rt a jav\u00edt\u00e1sokhoz a telep\u00edt\u0151t kell \u00fajra futtatni.",
+            "notes_en": "Installer-side fixes. Forwarded mail now passes SPF (SRS), and mail from bulk providers \u2014 Amazon SES, Mailchimp, Brevo and others \u2014 is no longer held up by greylisting; for Brevo it was not a delay but an outright block. No console code changed, so re-run the installer to pick these up."
+        },
         {
             "version": "1.0.25",
             "codename": "Tisza",
@@ -510,6 +532,6 @@
             "notes_en": "Baseline release: version display, update checking, database migration framework."
         }
     ],
-    "latest": "1.0.25",
-    "generated_at": "2026-09-11T06:59:07Z"
+    "latest": "1.0.26",
+    "generated_at": "2026-09-29T18:48:47Z"
 }
