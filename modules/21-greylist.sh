@@ -89,6 +89,59 @@ POSTGREY_OPTS="--auto-whitelist-clients=${GREY_AUTOWL} --max-age=${GREY_MAXAGE}"
 EOF
 fi
 
+# The packaged whitelist is a decade stale where it matters most. postgrey
+# ships /etc/postfix/postgrey_whitelist_clients (built 2016-09-22) and already
+# means to exempt Amazon SES — it lists "smtp-out.amazonses.com". AWS has since
+# moved to REGIONAL hostnames, a90-22.smtp-out.eu-west-1.amazonses.com, which do
+# not end with that string, so the entry silently stopped matching and every SES
+# message is greylisted. Measured on the reference host 2026-09-29: SES mail
+# arrived a mean of 8.7 and up to 17 minutes late, one message deferred twice
+# because SES retried at 241s against our 300s delay.
+#
+# It can never self-correct. SES stamps a unique envelope sender on every
+# message, so the triplet client/sender/recipient is new every time and
+# --auto-whitelist-clients cannot promote the client either, because SES rotates
+# a large IP pool. Greylisting therefore filters NOTHING from these senders and
+# only delays them — which is exactly why the packaged list carries entries like
+# "Southwest Airlines (unique sender, no retry)".
+#
+# Scope: greylisting only. rspamd still scores, tags and rejects this mail as
+# before, so this is not a spam whitelist. Entries are APPENDED if absent rather
+# than written wholesale, so an operator's own .local additions survive a re-run
+# and the module stays idempotent.
+GREY_WL=/etc/postfix/postgrey_whitelist_clients.local
+GREY_WL_ESPS="
+amazonses.com
+rsgsv.net
+mcsv.net
+mandrillapp.com
+sgmail.github.com
+mailer.shopify.com
+klaviyomail.com
+sparkpostmail.com
+mxout.mta3.net
+xqueue.com
+mailgun.net
+"
+
+if [ ! -e "$GREY_WL" ]; then
+  write_file "$GREY_WL" 0644 root:root <<'EOF'
+# Clients that should not be greylisted. See postgrey(8).
+# Managed by ilexa-installer (modules/21-greylist.sh) — it only ever APPENDS
+# the entries it needs, so anything you add here is preserved.
+EOF
+fi
+
+grey_wl_added=0
+for _esp in $GREY_WL_ESPS; do
+  grep -qxF "$_esp" "$GREY_WL" 2>/dev/null && continue
+  printf '%s\n' "$_esp" >>"$GREY_WL"
+  grey_wl_added=$(( grey_wl_added + 1 ))
+done
+if [ "$grey_wl_added" -gt 0 ]; then
+  log_info "whitelisted $grey_wl_added bulk-mail providers from greylisting (see $GREY_WL)"
+fi
+
 # RESTART, not merely enable — the same trap 30-auth.sh documents at length.
 # On Debian the package starts postgrey at install time, seconds ago, on the
 # distribution's default socket; 90-enable's `enable --now` does nothing to an
