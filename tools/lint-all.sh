@@ -137,6 +137,19 @@ elif [ "$quiet" != 1 ]; then
   echo "$fg_out" | tail -1
 fi
 
+# The scripts the installer WRITES, not just the ones it is. A module that
+# writes a script with write_file <<'EOF' has that body treated as a string by
+# both bash -n and shellcheck above, so mail-backup.sh -- a privileged nightly
+# root script -- had never been checked at all. Verified blind spot: injecting a
+# syntax error into that heredoc leaves both passes above green.
+hd_out="$("$HERE/tools/check-heredoc-scripts.sh" 2>&1)"; hd_rc=$?
+if [ "$hd_rc" != 0 ]; then
+  echo "$hd_out"
+  fail=1
+elif [ "$quiet" != 1 ]; then
+  echo "$hd_out" | tail -1
+fi
+
 # The spam/ham report handler's sender gate decides who may train the Bayes
 # classifier every user depends on. It was domain-level once, which let a
 # forged local sender poison the filter; these cases pin the decision table and
