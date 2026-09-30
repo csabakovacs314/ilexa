@@ -3,6 +3,11 @@
 Console releases, newest first. Generated from `RELEASES.json` by
 `tools/gen-changelog.py` -- edit the notes there, not here.
 
+## 1.0.27 (Tisza) — 2026-09-30
+`security` · **requires a full installer run**
+
+Database backup fix. On hosts with no off-host target (BACKUP_TARGET) no backup was being taken at all — the job exited early — and a truncated dump was shipped and logged as verified, because a short dump is still a valid gzip file, so nothing reported the failure. A verified local copy is now always kept (30 days, root-only), dumps are checked by content, and failures are emailed. Installer-side: re-run the installer to pick this up.
+
 ## 1.0.26 (Tisza) — 2026-09-29
 `fix` · **requires a full installer run**
 

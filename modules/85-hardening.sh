@@ -113,34 +113,123 @@ EOF
   log_info "kernel auto-reboot scheduled (Sun 04:30 if needed)"
 fi
 
-# ---- backups (module always installed; ACTIVE only when a target is set) ---
+# ---- backups (always keeps a verified LOCAL copy; ships off-host if asked) ---
+#
+# Reworked 2026-09-30. Two things were wrong with the previous version, both
+# found on a host that believed it was backed up:
+#
+#  1. It was INERT without BACKUP_TARGET -- it logged "no BACKUP_TARGET set" and
+#     exited 0, so a host with no off-host destination got no backup AT ALL, not
+#     even a local dump. That is the common case on a single-server deployment,
+#     and it is the case where losing the mailbox table means rebuilding every
+#     account by hand. It now always writes a verified local dump and treats
+#     shipping off-host as the optional extra.
+#  2. Its verification was `gzip -t` on one dump. A TRUNCATED dump is a
+#     perfectly valid gzip file -- verified live: piping half a real dump through
+#     gzip passes `gzip -t` cleanly -- so a short dump would be encrypted,
+#     shipped and logged as "restore-test OK". The check is now by CONTENT: the
+#     `-- Dump completed` marker mysqldump writes LAST, the CREATE TABLE count
+#     against the live schema, and for `postfix` the mailbox row count.
 write_file /usr/bin/mail-backup.sh 755 <<'EOF'
 #!/usr/bin/env bash
-# mail-backup — nightly per-DB dumps + mail-store sync to BACKUP_TARGET.
-# Inert (exit 0) until BACKUP_TARGET is configured in /etc/mail-backup.conf.
-set -euo pipefail
+# mail-backup — nightly verified DB dumps, kept locally and shipped off-host
+# when BACKUP_TARGET is configured in /etc/mail-backup.conf.
+#
+# Deliberately NOT inert without a target: the local verified dump is the part
+# that saves you from a bad migration or a dropped table, and it costs under a
+# megabyte. BACKUP_TARGET adds survival of losing the host, which the local copy
+# cannot give you -- they are different failures, so both layers exist.
+#
+# NO set -e: a failure on one database must still be reported, and the local
+# copy must still be kept even if shipping off-host fails.
+set -uo pipefail
+export PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
+CONF=/etc/mail-backup.conf
+# The directive must sit alone, directly above the source line: on a compound
+# line it binds to the assignment instead, and trailing prose on the directive
+# line makes shellcheck discard it (SC1125). Both cost a round to learn.
 # shellcheck source=/dev/null
-CONF=/etc/mail-backup.conf; [ -r "$CONF" ] && . "$CONF"
+[ -r "$CONF" ] && . "$CONF"
 : "${BACKUP_TARGET:=}"; : "${MAIL_STORE:=/data/mail}"
-[ -z "$BACKUP_TARGET" ] && { logger -t mail-backup "no BACKUP_TARGET set — skipping"; exit 0; }
-ts=$(date +%F); work=$(mktemp -d)
+: "${BACKUP_DBS:=postfix roundcube}"; : "${BACKUP_LOCAL_DIR:=/var/backups/ilexa-db}"
+: "${BACKUP_KEEP_DAYS:=30}"
+ts=$(date +%F-%H%M%S); rc=0
+
+# 0700 / 0600 throughout: these dumps contain mailbox password HASHES and users'
+# address books. A readable path must never exist, even briefly.
+install -d -m 0700 -o root -g root "$BACKUP_LOCAL_DIR" || {
+  logger -t mail-backup "cannot create $BACKUP_LOCAL_DIR"; exit 2; }
+work=$(mktemp -d); chmod 0700 "$work"
 trap 'rm -rf "$work"' EXIT
-for db in postfix roundcube; do
-  mysqldump --single-transaction "$db" | gzip > "$work/${db}-${ts}.sql.gz"
+
+for db in $BACKUP_DBS; do
+  f="$work/${db}-${ts}.sql.gz"
+  if ! mysqldump --single-transaction --quick --routines --triggers \
+                 --default-character-set=utf8mb4 --databases "$db" 2>"$f.err" | gzip -c >"$f"; then
+    logger -t mail-backup "FAILED $db: mysqldump -- $(tr -d '\n' <"$f.err" | cut -c1-120)"
+    rm -f "$f" "$f.err"; rc=1; continue
+  fi
+  rm -f "$f.err"
+
+  # --- verify by CONTENT. gzip -t alone accepts a truncated dump. ---
+  if ! gzip -t "$f" 2>/dev/null; then
+    logger -t mail-backup "FAILED $db: gzip integrity"; rm -f "$f"; rc=1; continue
+  fi
+  if ! zcat "$f" | tail -5 | grep -q '^-- Dump completed'; then
+    logger -t mail-backup "FAILED $db: truncated (no '-- Dump completed' marker)"
+    rm -f "$f"; rc=1; continue
+  fi
+  live_t=$(mysql -N -e "SELECT COUNT(*) FROM information_schema.tables WHERE table_schema='$db';" 2>/dev/null)
+  dump_t=$(zcat "$f" | grep -c '^CREATE TABLE')
+  if [ -z "$live_t" ] || [ "$dump_t" -lt "$live_t" ]; then
+    logger -t mail-backup "FAILED $db: $dump_t tables dumped, $live_t live"
+    rm -f "$f"; rc=1; continue
+  fi
+  if [ "$db" = postfix ]; then
+    live_mb=$(mysql -N -e "SELECT COUNT(*) FROM postfix.mailbox;" 2>/dev/null)
+    dump_mb=$(zcat "$f" | sed -n "/INSERT INTO \`mailbox\`/,/;\$/p" | grep -o "),(" | wc -l)
+    dump_mb=$(( dump_mb > 0 ? dump_mb + 1 : 0 ))
+    if [ "$dump_mb" -lt "$live_mb" ]; then
+      logger -t mail-backup "FAILED postfix: ~$dump_mb mailbox rows dumped, $live_mb live"
+      rm -f "$f"; rc=1; continue
+    fi
+  fi
+
+  # Keep the verified local copy BEFORE any encryption or shipping, so a broken
+  # target or a missing gpg can never cost you the backup itself.
+  install -m 0600 -o root -g root "$f" "$BACKUP_LOCAL_DIR/$(basename "$f")" \
+    && logger -t mail-backup "ok $db: $(du -h "$f" | cut -f1), $dump_t tables (local)"
 done
-# restore-test hook: verify the newest dump gunzips cleanly BEFORE shipping.
-gzip -t "$work/postfix-${ts}.sql.gz" || { logger -t mail-backup "restore-test FAILED — aborting"; exit 1; }
-# Dumps contain mailbox password HASHES — encrypt at rest before shipping.
+
+# --- retention. Never prune the newest copy of a database, whatever its age. --
+for db in $BACKUP_DBS; do
+  newest=$(ls -1t "$BACKUP_LOCAL_DIR"/"$db"-*.sql.gz 2>/dev/null | head -1)
+  while IFS= read -r old; do
+    [ "$old" = "$newest" ] && continue
+    rm -f -- "$old"
+  done < <(find "$BACKUP_LOCAL_DIR" -maxdepth 1 -name "$db-*.sql.gz" -mtime +"$BACKUP_KEEP_DAYS" 2>/dev/null)
+done
+
+# --- off-host, only if asked -------------------------------------------------
+if [ -z "$BACKUP_TARGET" ]; then
+  logger -t mail-backup "local copy kept in $BACKUP_LOCAL_DIR; no BACKUP_TARGET set, nothing shipped"
+  exit "$rc"
+fi
 if [ -n "${BACKUP_PASSPHRASE:-}" ]; then
   for f in "$work"/*.sql.gz; do
+    [ -e "$f" ] || continue
     gpg --batch --yes --passphrase "$BACKUP_PASSPHRASE" -c "$f" && rm -f "$f"
   done
 else
   logger -t mail-backup "WARNING: BACKUP_PASSPHRASE unset — DB dumps ship UNENCRYPTED"
 fi
 # rsync-style target example; adapt to restic/borg/S3 as needed.
-rsync -a "$work"/ "$BACKUP_TARGET/db/" && rsync -a "$MAIL_STORE"/ "$BACKUP_TARGET/mail/"
-logger -t mail-backup "backup + restore-test OK ($ts)"
+if rsync -a "$work"/ "$BACKUP_TARGET/db/" && rsync -a "$MAIL_STORE"/ "$BACKUP_TARGET/mail/"; then
+  logger -t mail-backup "shipped to $BACKUP_TARGET ($ts)"
+else
+  logger -t mail-backup "FAILED: shipping to $BACKUP_TARGET (local copy is intact)"; rc=1
+fi
+exit "$rc"
 EOF
 if [ "$DRY_RUN" != 1 ]; then
   command -v gpg >/dev/null 2>&1 || pkg_try gnupg2 >/dev/null 2>&1 || log_warn "gnupg2 not installed — backup encryption unavailable"
@@ -148,9 +237,14 @@ if [ "$DRY_RUN" != 1 ]; then
     "$BACKUP_TARGET" "$MAIL_STORE" "${BACKUP_PASSPHRASE:-}" > /etc/mail-backup.conf
   chmod 600 /etc/mail-backup.conf
   write_file /etc/cron.d/mail-backup 644 <<'EOF'
-30 2 * * * root /usr/bin/mail-backup.sh
+# Nightly verified DB dumps. A local copy is always kept (see mail-backup.sh);
+# off-host shipping happens only when BACKUP_TARGET is set.
+# MAILTO empty on purpose: cron-alert.sh then uses /etc/ilexa/alerts.conf, and
+# mails only when a dump, its verification, or the shipping step fails.
+MAILTO=""
+30 2 * * * root /usr/bin/cron-alert.sh mail-backup /usr/bin/mail-backup.sh
 EOF
-  [ -n "$BACKUP_TARGET" ] && log_info "backups ACTIVE -> $BACKUP_TARGET" || log_info "backup module installed but INACTIVE (set BACKUP_TARGET in /etc/mail-backup.conf)"
+  [ -n "$BACKUP_TARGET" ] && log_info "backups: local + off-host -> $BACKUP_TARGET" || log_info "backups: verified local dumps in /var/backups/ilexa-db (set BACKUP_TARGET in /etc/mail-backup.conf to also ship off-host)"
 fi
 
 mark_done 85-hardening

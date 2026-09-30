@@ -1,8 +1,30 @@
 {
     "schema": 1,
-    "serial": 27,
+    "serial": 28,
     "channel": "stable",
     "releases": [
+        {
+            "version": "1.0.27",
+            "codename": "Tisza",
+            "tag": "v1.0.27",
+            "released_at": "2026-09-30",
+            "commit": "ac1a160",
+            "severity": "security",
+            "requires_installer": true,
+            "min_upgrade_from": "0.0.0",
+            "schema_version": {
+                "mysql": 1,
+                "iocs": 2,
+                "logins": 3
+            },
+            "app_tarball": {
+                "path": "assets/ilexa-app.tar.gz",
+                "sha256": "1559f710200285aa8dde0ea2767cd6353212f57188c79bf5b492f47a6b20b4f5",
+                "size": 1951830
+            },
+            "notes_hu": "Adatb\u00e1zis-ment\u00e9s jav\u00edt\u00e1s. Ahol nincs k\u00fcls\u0151 ment\u00e9si c\u00e9l be\u00e1ll\u00edtva (BACKUP_TARGET), ott eddig egy\u00e1ltal\u00e1n nem k\u00e9sz\u00fclt ment\u00e9s: a feladat kor\u00e1n kil\u00e9pett. Emellett a csonka ment\u00e9s is \u201eellen\u0151rz\u00f6ttk\u00e9nt\" ment tov\u00e1bb, mert a f\u00e9lbev\u00e1gott dump is \u00e9rv\u00e9nyes gzip f\u00e1jl \u2014 \u00edgy a hib\u00e1t semmi nem jelezte. Mostant\u00f3l mindig k\u00e9sz\u00fcl ellen\u0151rz\u00f6tt helyi m\u00e1solat (30 nap, csak root olvashatja), a ment\u00e9s tartalom szerint ellen\u0151rz\u0151dik, \u00e9s a hiba e-mailben is megjelenik. Telep\u00edt\u0151oldali jav\u00edt\u00e1s: a friss\u00edt\u00e9shez futtasd \u00fajra a telep\u00edt\u0151t.",
+            "notes_en": "Database backup fix. On hosts with no off-host target (BACKUP_TARGET) no backup was being taken at all \u2014 the job exited early \u2014 and a truncated dump was shipped and logged as verified, because a short dump is still a valid gzip file, so nothing reported the failure. A verified local copy is now always kept (30 days, root-only), dumps are checked by content, and failures are emailed. Installer-side: re-run the installer to pick this up."
+        },
         {
             "version": "1.0.26",
             "codename": "Tisza",
@@ -532,6 +554,6 @@
             "notes_en": "Baseline release: version display, update checking, database migration framework."
         }
     ],
-    "latest": "1.0.26",
-    "generated_at": "2026-09-29T18:48:47Z"
+    "latest": "1.0.27",
+    "generated_at": "2026-09-30T07:25:14Z"
 }
