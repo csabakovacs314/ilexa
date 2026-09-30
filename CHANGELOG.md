@@ -3,6 +3,11 @@
 Console releases, newest first. Generated from `RELEASES.json` by
 `tools/gen-changelog.py` -- edit the notes there, not here.
 
+## 1.0.28 (Tisza) — 2026-09-30
+`fix`
+
+The nightly database backup script now arrives by console update too. Until now it was written out by an installer module, so every fix to it — including 1.0.27's truncated-dump fix — needed a full installer run. No behaviour change in this release: the script is the same, only its delivery path changes, and the old path keeps working.
+
 ## 1.0.27 (Tisza) — 2026-09-30
 `security` · **requires a full installer run**
 

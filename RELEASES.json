@@ -1,8 +1,30 @@
 {
     "schema": 1,
-    "serial": 28,
+    "serial": 29,
     "channel": "stable",
     "releases": [
+        {
+            "version": "1.0.28",
+            "codename": "Tisza",
+            "tag": "v1.0.28",
+            "released_at": "2026-09-30",
+            "commit": "8dde578",
+            "severity": "fix",
+            "requires_installer": false,
+            "min_upgrade_from": "0.0.0",
+            "schema_version": {
+                "mysql": 1,
+                "iocs": 2,
+                "logins": 3
+            },
+            "app_tarball": {
+                "path": "assets/ilexa-app.tar.gz",
+                "sha256": "3828c459de8a92841590a1fbc80acac1661ed055ce82cca4411455bf374dcd5f",
+                "size": 1953610
+            },
+            "notes_hu": "A nightly adatb\u00e1zis-ment\u00e9s szkriptje mostant\u00f3l konzol-friss\u00edt\u00e9ssel is meg\u00e9rkezik. Eddig a telep\u00edt\u0151 modulja \u00edrta ki, \u00edgy minden jav\u00edt\u00e1sa \u2014 p\u00e9ld\u00e1ul az 1.0.27-ben jav\u00edtott csonka ment\u00e9s \u2014 teljes telep\u00edt\u0151fut\u00e1st ig\u00e9nyelt. Ebben a kiad\u00e1sban nincs m\u0171k\u00f6d\u00e9sbeli v\u00e1ltoz\u00e1s: a szkript ugyanaz, csak a sz\u00e1ll\u00edt\u00e1si \u00fatja v\u00e1ltozik, \u00e9s a r\u00e9gi \u00fatvonal tov\u00e1bbra is m\u0171k\u00f6dik.",
+            "notes_en": "The nightly database backup script now arrives by console update too. Until now it was written out by an installer module, so every fix to it \u2014 including 1.0.27's truncated-dump fix \u2014 needed a full installer run. No behaviour change in this release: the script is the same, only its delivery path changes, and the old path keeps working."
+        },
         {
             "version": "1.0.27",
             "codename": "Tisza",
@@ -554,6 +576,6 @@
             "notes_en": "Baseline release: version display, update checking, database migration framework."
         }
     ],
-    "latest": "1.0.27",
-    "generated_at": "2026-09-30T07:25:14Z"
+    "latest": "1.0.28",
+    "generated_at": "2026-09-30T12:15:29Z"
 }
