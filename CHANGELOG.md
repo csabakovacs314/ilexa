@@ -3,6 +3,11 @@
 Console releases, newest first. Generated from `RELEASES.json` by
 `tools/gen-changelog.py` -- edit the notes there, not here.
 
+## 1.0.29 (Tisza) — 2026-10-14
+`security`
+
+Security and usability release. Saving a Postfix restriction chain can no longer leave the server without relay protection: both the console and its helper refuse it. Every release now asks first and names the message, and the message viewer lists attachments (details only, dangerous types flagged). The Admin and System pages are one Settings page with group tabs and a search box, the audit log is its own page again, the Overview gains a "Needs attention" card, and there are many keyboard, contrast and screen-reader fixes.
+
 ## 1.0.28 (Tisza) — 2026-09-30
 `fix`
 

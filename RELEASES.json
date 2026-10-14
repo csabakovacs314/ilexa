@@ -1,8 +1,30 @@
 {
     "schema": 1,
-    "serial": 29,
+    "serial": 30,
     "channel": "stable",
     "releases": [
+        {
+            "version": "1.0.29",
+            "codename": "Tisza",
+            "tag": "v1.0.29",
+            "released_at": "2026-10-14",
+            "commit": "f57fe83",
+            "severity": "security",
+            "requires_installer": false,
+            "min_upgrade_from": "0.0.0",
+            "schema_version": {
+                "mysql": 1,
+                "iocs": 2,
+                "logins": 3
+            },
+            "app_tarball": {
+                "path": "assets/ilexa-app.tar.gz",
+                "sha256": "e184e52ad53b6f986a92f0ababaf4b472781b154247364e996dedf5f01ec1e30",
+                "size": 1998473
+            },
+            "notes_hu": "Biztons\u00e1gi \u00e9s haszn\u00e1lhat\u00f3s\u00e1gi kiad\u00e1s. A Postfix-korl\u00e1toz\u00e1si l\u00e1ncok ment\u00e9se t\u00f6bb\u00e9 nem hagyhatja a szervert rel\u00e9-v\u00e9delem n\u00e9lk\u00fcl: a konzol \u00e9s a seg\u00e9dszkript is ellen\u0151rzi. A felszabad\u00edt\u00e1s mindenhol meger\u0151s\u00edt\u00e9st k\u00e9r \u00e9s megnevezi a levelet, a lev\u00e9ln\u00e9zet pedig mutatja a mell\u00e9kleteket (csak adatok, a vesz\u00e9lyes t\u00edpusok jel\u00f6lve). Az Admin \u00e9s a Rendszer lap egyetlen Be\u00e1ll\u00edt\u00e1sok oldal lett csoport-f\u00fclekkel \u00e9s keres\u00e9ssel, az Audit napl\u00f3 ism\u00e9t \u00f6n\u00e1ll\u00f3 oldal, az \u00c1ttekint\u00e9sen Teend\u0151k k\u00e1rtya jelent meg, \u00e9s sok billenty\u0171zet-, kontraszt- \u00e9s k\u00e9perny\u0151olvas\u00f3-jav\u00edt\u00e1s k\u00e9sz\u00fclt.",
+            "notes_en": "Security and usability release. Saving a Postfix restriction chain can no longer leave the server without relay protection: both the console and its helper refuse it. Every release now asks first and names the message, and the message viewer lists attachments (details only, dangerous types flagged). The Admin and System pages are one Settings page with group tabs and a search box, the audit log is its own page again, the Overview gains a \"Needs attention\" card, and there are many keyboard, contrast and screen-reader fixes."
+        },
         {
             "version": "1.0.28",
             "codename": "Tisza",
@@ -576,6 +598,6 @@
             "notes_en": "Baseline release: version display, update checking, database migration framework."
         }
     ],
-    "latest": "1.0.28",
-    "generated_at": "2026-09-30T12:15:29Z"
+    "latest": "1.0.29",
+    "generated_at": "2026-10-14T16:37:39Z"
 }

@@ -213,10 +213,24 @@ what it will build and warning that it targets a fresh host. From there:
 - **Ctrl+X** — exit immediately, making no changes (handled by a raw single-key
   read, so it works reliably; whiptail cannot bind Ctrl+X itself).
 
-During the questionnaire every dialog has an **Exit** button (and **Esc** works
-too). Choosing Exit/Esc aborts cleanly with no changes. The final **review
-screen** lists every setting; its **Abort** button stops before anything is
-touched. Nothing on disk changes until you pass that review.
+The questionnaire is a numbered series of steps — every title reads
+**Step n of N**, where N counts only the steps this host actually gets (the
+rspamd-signature step appears only where the platform refuses rspamd's key).
+Step 1's button is **Exit**; from step 2 on it is **Back**, which returns to the
+previous step with your earlier answer filled in. **Esc** quits immediately on
+every screen, with no changes. Passwords and API keys are never pre-filled —
+revisiting one offers *keep the one entered before*, *type a different one*, or
+*leave it blank*.
+
+The final **review screen** lists every answer in the same words the questions
+used, as it will be **applied** — a question left blank shows the default it
+falls back to (a blank geoblock is `ru cn br kr`). It offers three choices:
+**Apply**, **Change…**, or **Abort**. Change… opens the chosen answer's own
+step, which runs that step's checks again (a real FQDN, a non-blank primary
+domain and admin address, readable certificate files), then returns to the
+review; an address that was simply the default derived from a changed answer
+(e.g. `postmaster@<domain>`) follows it. Nothing on disk changes until you
+choose Apply.
 
 ---
 
@@ -441,16 +455,17 @@ owning module rewrites them.
    and looking hung. Every later apt call additionally carries
    `DPkg::Lock::Timeout` in case an updater re-triggers mid-run.
 3. **welcome screen** (interactive) → purpose + Ctrl+X exit.
-3. **collect answers** → whiptail wizard *or* source the answer file.
+3. **collect answers** → whiptail wizard *or* source the answer file. The
+   wizard ends on its **review screen** (Apply / Change… / Abort), so in
+   interactive mode everything below runs only after Apply.
 4. **apply defaults + derive values** → e.g. TLS cert paths from `TLS_MODE`,
    the postscreen DNSBL list (adds `otx.rbl*2` only if OTX is on),
    `smtpd_delay_reject` from the SMTP-tuning toggle.
 5. **validate** → required keys present, FQDN looks like an FQDN, warn if SSH
    key-only is requested without a key.
 6. **export config** → all answers exported so module subprocesses inherit them.
-7. **review screen** (interactive) → confirm, or abort with no changes.
-8. **preflight gate** → root + a supported OS (EL 9/10 or Ubuntu 22.04/24.04/26.04 LTS).
-9. **run modules** → each `modules/NN-*.sh` executed **as a subprocess** in
+7. **preflight gate** → root + a supported OS (EL 9/10 or Ubuntu 22.04/24.04/26.04 LTS).
+8. **run modules** → each `modules/NN-*.sh` executed **as a subprocess** in
    numeric order. A module failure stops the run.
 
 Modules run as isolated subprocesses (not sourced) so one module crashing cannot

@@ -166,31 +166,276 @@ box you intend to turn into a mail server."
   fi
 }
 
+# ---- the interactive wizard ---------------------------------------------------
+# collect_interactive() decides which steps this host gets and hands them to
+# tui_wizard (lib/tui.sh), which walks them -- Exit on step 1, Back on every
+# step after it, Esc quits anywhere -- and ends on the review screen, where
+# Change... re-runs one step and returns to the review. Nothing is written
+# before Apply.
+#
+# Each wz_* step function:
+#   - prefills from the answer it got the last time it ran (_wz_default), so
+#     Back and Change... show what was entered rather than the first default;
+#   - assigns its variables only once ALL of its dialogs are answered, so
+#     backing out half-way through a step leaves the earlier answer intact;
+#   - runs its own validation every time it runs, so a changed answer is
+#     checked exactly like a first one;
+#   - returns its dialog's status: 0 = answered, 1 = Back/Exit, other = quit.
 collect_interactive() {
   ensure_tui
-  # Choosing "Exit"/Esc on any prompt aborts cleanly (md_abort), no changes.
-  # No placeholder pre-filled here on purpose: offering "mail.example.com" as
-  # the suggested default meant pressing Enter/OK without editing it silently
-  # accepted the placeholder as a real answer — confirmed live, an operator
-  # did exactly this repeatedly and only noticed once TLS/DNS broke much
-  # later. Loop until a real, dotted, non-placeholder value is entered.
+  wz_init
+  # Probed BEFORE the first question rather than where its question sits:
+  # whether that step exists decides N in "Step n of N", and N must not change
+  # half-way through. Throwaway rpm database, nothing imported -- see the
+  # function. The answer cannot change during the run, so it is asked once.
+  # Said out loud: the fetch can take up to 20 s, and nothing else is on the
+  # screen while it runs. (A whiptail infobox would vanish at once on any
+  # terminal with an alternate screen, so a plain line it is.)
+  local rspamd_step=0
+  log_info "checking whether this system accepts rspamd's package signing key (can take up to 20 s)..."
+  rspamd_key_importable || rspamd_step=1
+  MD_WZ_STEPS=(
+    "wz_fqdn|Mail server FQDN"
+    "wz_domain|Primary mail domain"
+    "wz_extra_domains|Extra mail domains"
+    "wz_admin_email|Admin email"
+    "wz_alert_email|Alert email"
+    "wz_admin_password|Admin password"
+    "wz_mail_store|Mail store"
+    "wz_timezone|Timezone"
+    "wz_tls|TLS certificate"
+    "wz_spam_reject|Spam reject threshold"
+    "wz_geoblock|Geoblock"
+    "wz_ssh_port|SSH port"
+    "wz_otx|AlienVault OTX"
+    "wz_dqs|Spamhaus DQS"
+    "wz_feeds|Reputation feeds"
+  )
+  [ "$rspamd_step" = 1 ] && MD_WZ_STEPS+=("wz_rspamd_unsigned|rspamd signature")
+  MD_WZ_STEPS+=(
+    "wz_archive|Mail archive"
+    "wz_greylisting|Greylisting"
+    "wz_language|Interface language"
+    "wz_pwexpiry|Password expiry"
+    "wz_extras|Optional extras"
+    "wz_hardening|Hardening"
+  )
+  local rc=0
+  tui_wizard review_text wz_value wz_rederive || rc=$?
+  # The answer memory holds every password and API key typed, in plain text,
+  # including ones later replaced. The answers themselves live on in their own
+  # variables; the memory has no use after the review.
+  unset _WZ_MEM _WZ_OFFERED _WZ_ORIG _WZ_VAL _WZ_DEF
+  [ "$rc" = 0 ] || md_abort
+  if [ "$rspamd_step" = 1 ] && [ "${RSPAMD_ALLOW_UNSIGNED:-no}" = yes ]; then
+    log_warn "operator accepted UNVERIFIED rspamd packages (RSPAMD_ALLOW_UNSIGNED=yes)"
+  fi
+  return 0
+}
+
+# After a Change... from the review: an answer that was simply the default
+# derived from another one follows that one. Change the primary domain, and an
+# admin address that was postmaster@<old domain> only because that was offered
+# becomes postmaster@<new domain> -- as a straight run with the new domain would
+# have offered. An answer the operator typed differently is left alone. In
+# order, because each default is derived from the one before.
+wz_rederive() {
+  _wz_follow PRIMARY_DOMAIN "${MAIL_FQDN#*.}"
+  _wz_follow ADMIN_EMAIL "postmaster@$PRIMARY_DOMAIN"
+  _wz_follow ALERT_EMAIL "$ADMIN_EMAIL"
+  return 0
+}
+_wz_follow() { # KEY new_default
+  if [ -n "${_WZ_MEM[$1]+x}" ] && [ "${_WZ_MEM[$1]}" = "${_WZ_OFFERED[$1]-}" ]; then
+    _wz_set "$1" "$2" "$2"
+  fi
+  return 0
+}
+
+wz_init() {
+  declare -gA _WZ_MEM=() _WZ_OFFERED=() _WZ_ORIG=()
+  _WZ_DEF=""; _WZ_VAL=""
+  # Keys that only some answers ask for. If a later Back/Change... takes the
+  # other branch, they go back to what they were before the wizard -- the same
+  # end state as a straight run that never asked them.
+  _wz_snapshot TLS_CUSTOM_CERT TLS_CUSTOM_KEY OTX_API_KEY \
+    ABUSECH_API_KEY ABUSEIPDB_API_KEY ARCHIVE_RETENTION_DAYS
+  # tag|VARIABLE|label|default. ONE table per checklist, read by the checklist,
+  # by the review and by the Change... menu, so the review can never describe
+  # an option with different words than the screen that offered it.
+  WZ_EXTRAS=(
+    "last_login|ENABLE_LAST_LOGIN|Dovecot last-login tracking|yes"
+    "fts_xapian|ENABLE_FTS_XAPIAN|Full-text search (compiled; RAM-heavy)|yes"
+    "unattended|ENABLE_UNATTENDED|Unattended security updates|yes"
+    "mx_check|ENABLE_MX_CHECK|rspamd: sender MX validation (needs outbound :25)|yes"
+    "known_senders|ENABLE_KNOWN_SENDERS|rspamd: per-sender freemail reputation|yes"
+  )
+  # clamav-unofficial-sigs is packaged in EPEL but has NO Debian/Ubuntu
+  # package at all (checked: apt only offers "fangfrisch", a different tool
+  # with an incompatible config format). Offering the choice on apt would be
+  # offering something we cannot deliver, so the item only appears where it
+  # can actually be installed; 35-clamav logs the reason on apt.
+  if [ "${PKG_MGR:-dnf}" != apt ]; then
+    WZ_EXTRAS+=("unofficial_sigs|ENABLE_UNOFFICIAL_SIGS|Third-party ClamAV signature sources + YARA|yes")
+  fi
+  WZ_HARDENING=(
+    "ssh|HARDEN_SSH_KEYONLY|SSH key-only + sudo admin user|yes"
+    "webmin|HARDEN_WEBMIN|Webmin source-IP allowlist|yes"
+    "reboot|HARDEN_KERNEL_AUTOREBOOT|Kernel auto-reboot maintenance window|yes"
+    "smtp|HARDEN_SMTP_TUNING|SMTP tuning (50M limit, delay_reject)|yes"
+  )
+  # SELinux is EL-only -- 85-hardening.sh already no-ops HARDEN_SELINUX=yes on
+  # Debian/Ubuntu with a warning ("SELinux is EL-only"), because the
+  # answers-file path can set it for any OS and that path must still fail
+  # safely. But the WIZARD offering it as a selectable item on every OS,
+  # including where it can only ever do nothing, is its own bug: reported live
+  # as "selinux is selectable on ubuntu 24, however it exists only on CentOS".
+  # Only add it to the list where it can actually do something.
+  if [ "${PKG_MGR:-}" = dnf ]; then
+    WZ_HARDENING+=("selinux|HARDEN_SELINUX|SELinux enforcing (advanced)|no")
+  fi
+  return 0
+}
+
+# _wz_default KEY default -> _WZ_DEF, the value to prefill.
+# The answer from the last time this step ran -- unless that answer simply WAS
+# the default on offer then, in which case today's default is offered. That
+# matters for derived defaults: accept "example.org" as the mail domain (taken
+# from the FQDN), go Back, fix a typo in the FQDN, and the domain offered next
+# follows the corrected FQDN instead of keeping the typo.
+_wz_default() {
+  if [ -n "${_WZ_MEM[$1]+x}" ] && [ "${_WZ_MEM[$1]}" != "${_WZ_OFFERED[$1]-}" ]; then
+    _WZ_DEF=${_WZ_MEM[$1]}
+  else
+    _WZ_DEF=$2
+  fi
+  return 0
+}
+_wz_set() { # KEY value default_that_was_offered
+  printf -v "$1" '%s' "$2"
+  _WZ_MEM[$1]=$2; _WZ_OFFERED[$1]=$3
+}
+_wz_snapshot() { # KEY... -> remember each key's value from before the wizard
+  local k
+  for k in "$@"; do
+    if [ -n "${!k+x}" ]; then _WZ_ORIG[$k]=${!k}; fi
+  done
+  return 0
+}
+_wz_unasked() { # KEY... -> back to the pre-wizard value (or unset): not asked after all
+  local k
+  for k in "$@"; do
+    if [ -n "${_WZ_ORIG[$k]+x}" ]; then printf -v "$k" '%s' "${_WZ_ORIG[$k]}"; else unset "$k"; fi
+  done
+  return 0
+}
+
+# _wz_input KEY prompt default [required]
+# One free-text answer. "required" refuses a blank one here, in its own step,
+# with the same rule validate() applies (REQUIRED_KEYS) -- otherwise the blank
+# would only be caught after Apply, by a die that discards every answer.
+_wz_input() {
+  local v rc
+  _wz_default "$1" "$3"; v=$_WZ_DEF
+  while true; do
+    v=$(tui_input "$2" "$v") || return $?
+    if [ -n "$v" ] || [ "${4:-}" != required ] || ! _tui_ok; then break; fi
+    rc=0; tui_msg "Answer required" "This one cannot be left blank -- the install needs it." || rc=$?
+    [ "$rc" = 0 ] || [ "$rc" = 1 ] || return "$rc"
+    v=$3
+  done
+  _wz_set "$1" "$v" "$3"
+}
+
+# _wz_secret prompt blank_label current -> _WZ_VAL
+# A password or API key. It is never prefilled: whiptail takes an initial value
+# only on its command line, where /proc/<pid>/cmdline shows it to every local
+# user (see tui_password). When a value already exists, a choice comes first --
+# keep it, type another, or leave it blank -- so Back does not mean re-typing.
+_wz_secret() {
+  local prompt="$1" blank="$2" cur="${3:-}" c v rc s=1 first
+  if [ -n "$cur" ] && _tui_ok; then s=0; fi
+  first=$s
+  while true; do
+    if [ "$s" = 0 ]; then
+      c=$(tui_choice "" "$prompt
+
+One was entered on an earlier visit. It is not shown, and never goes on a command line where other local users could read it." keep \
+        keep  "Keep the one entered before" \
+        new   "Type a different one" \
+        blank "$blank") || return $?
+      case "$c" in
+        keep)  _WZ_VAL=$cur; return 0 ;;
+        blank) _WZ_VAL="";   return 0 ;;
+      esac
+      s=1
+    fi
+    rc=0; v=$(tui_password "$prompt") || rc=$?
+    if [ "$rc" = 1 ] && [ "$first" = 0 ]; then s=0; continue; fi
+    [ "$rc" = 0 ] || return "$rc"
+    _WZ_VAL=$v; return 0
+  done
+}
+
+# _wz_checklist title row... (rows: see WZ_EXTRAS) -- one yes/no per row
+_wz_checklist() {
+  local title="$1" row tag var label def st picked v args=()
+  shift
+  for row in "$@"; do
+    IFS='|' read -r tag var label def <<<"$row"
+    _wz_default "$var" "$def"
+    if [ "$_WZ_DEF" = yes ]; then st=on; else st=off; fi
+    args+=("$tag" "$label" "$st")
+  done
+  picked=$(tui_checklist "$title" "${args[@]}") || return $?
+  for row in "$@"; do
+    IFS='|' read -r tag var label def <<<"$row"
+    case " $picked " in *" $tag "*) v=yes ;; *) v=no ;; esac
+    _wz_set "$var" "$v" "$def"
+  done
+}
+
+_wz_tls_label() { # mode -> the words the TLS step uses for it
+  case "$1" in
+    letsencrypt) printf '%s' "Let's Encrypt" ;;
+    custom)      printf '%s' "My own certificate (PEM files on this host)" ;;
+    selfsigned)  printf '%s' "Self-signed lab cert (browsers WILL warn)" ;;
+    *)           printf '%s' "$1" ;;
+  esac
+}
+_wz_lang_label() { # code -> the words the language step uses for it
+  case "$1" in
+    en) printf 'English' ;;
+    hu) printf 'Magyar (Hungarian)' ;;
+    *)  printf '%s' "$1" ;;
+  esac
+}
+
+# No placeholder pre-filled on the first visit, on purpose: offering
+# "mail.example.com" as the suggested default meant pressing Enter/OK without
+# editing it silently accepted the placeholder as a real answer -- confirmed
+# live, an operator did exactly this repeatedly and only noticed once TLS/DNS
+# broke much later. Loop until a real, dotted, non-placeholder value is
+# entered.
+wz_fqdn() {
+  local v
   if _tui_ok; then
-    MAIL_FQDN=""
+    _wz_default MAIL_FQDN ""; v=$_WZ_DEF
     while true; do
-      MAIL_FQDN=$(tui_input "Mail server public FQDN (MX target / TLS CN), e.g. mail.yourdomain.com:" "$MAIL_FQDN") || md_abort
-      case "$MAIL_FQDN" in
+      v=$(tui_input "Mail server public FQDN (MX target / TLS CN), e.g. mail.yourdomain.com:" "$v") || return $?
+      case "$v" in
         ""|mail.example.com)
-          tui_msg "FQDN required" "Enter your actual mail server FQDN. \"mail.example.com\" is only a placeholder from the docs — it won't resolve."
+          tui_msg "FQDN required" "Enter your actual mail server FQDN. \"mail.example.com\" is only a placeholder from the docs — it won't resolve." || return $?
           # Come back with an EMPTY box rather than re-offering the value
           # just rejected: whiptail pre-fills the default with the cursor
           # at the end and typing APPENDS to it, so re-seeding the
           # placeholder means the next attempt silently becomes
           # "mail.example.com<whatever they type>" unless they manually
           # clear the field first.
-          MAIL_FQDN="" ;;
+          v="" ;;
         *.*) break ;;
-        *) tui_msg "Invalid FQDN" "\"$MAIL_FQDN\" doesn't look like a FQDN (needs at least one dot, e.g. mail.yourdomain.com)."
-           MAIL_FQDN="" ;;
+        *) tui_msg "Invalid FQDN" "\"$v\" doesn't look like a FQDN (needs at least one dot, e.g. mail.yourdomain.com)." || return $?
+           v="" ;;
       esac
     done
   else
@@ -199,99 +444,211 @@ collect_interactive() {
     # single non-looping call rather than spin forever waiting for a value
     # that will never change. tui_input's own non-TTY branch just echoes
     # this default straight back.
-    MAIL_FQDN=$(tui_input "Mail server public FQDN (MX target / TLS CN):" "mail.example.com") || md_abort
+    v=$(tui_input "Mail server public FQDN (MX target / TLS CN):" "mail.example.com") || return $?
   fi
+  _wz_set MAIL_FQDN "$v" ""
   MAIL_HOSTNAME="${MAIL_FQDN%%.*}"
-  PRIMARY_DOMAIN=$(tui_input "Primary virtual mail domain:" "${MAIL_FQDN#*.}") || md_abort
-  EXTRA_DOMAINS=$(tui_input "Extra virtual domains (space-separated, or blank):" "") || md_abort
-  ADMIN_EMAIL=$(tui_input "Admin / PostfixAdmin superadmin email:" "postmaster@$PRIMARY_DOMAIN") || md_abort
-  # Where scheduled jobs send alerts (feed refresh failures, SIEM export
-  # health, neural training milestones...). Asked separately from ADMIN_EMAIL
-  # because they are genuinely different roles -- the PostfixAdmin superadmin
-  # is a mailbox identity, this is a human who reads operational mail, and on
-  # a real deployment that is often a monitored address elsewhere. Defaults to
-  # ADMIN_EMAIL so answering nothing is still correct.
-  #
-  # This is seeded into /etc/ilexa/alerts.conf by 55-ilexa. Before it was
-  # asked, that file simply did not exist on a fresh install, so EVERY
-  # cron-alert.sh notification was silently discarded until someone found the
-  # setting in the console's Admin tab -- which nobody does before the first
-  # failure they needed to hear about.
-  ALERT_EMAIL=$(tui_input "Email for system notifications/alerts (blank = none):" "$ADMIN_EMAIL") || md_abort
-  ADMIN_PASSWORD=$(tui_password "PostfixAdmin superadmin password (blank = auto-generate):") || md_abort
-  MAIL_STORE=$(tui_input "Maildir store root:" "/data/mail") || md_abort
-  # Asked for explicitly: it drives the system clock, mail-log timestamps, cron
-  # and every time the console displays, and silently defaulting to UTC left
-  # operators reading their own logs two hours out. Defaults to whatever the
-  # host is already set to, so answering nothing changes nothing.
-  # Timezone: a menu of common zones plus "Other...", not a bare free-text
-  # field -- reported from a live run as offering nothing selectable. The
-  # host's CURRENT zone is preselected (plain Enter keeps it) and prepended so
-  # it is always an option even when it is not in the common list; "Other..."
-  # falls back to free text for anything else.
-  _tz_host="$(timedatectl show -p Timezone --value 2>/dev/null || echo UTC)"
-  TIMEZONE=$(tui_menu "System timezone" \
-    "Drives the clock, mail-log timestamps and everything the console displays. The current host setting is preselected -- press Enter to keep it." \
-    "$_tz_host" \
-    "$_tz_host" "current host setting" \
-    Europe/Budapest "Hungary (CET/CEST)" \
-    Europe/London   "UK" \
-    Europe/Berlin   "Central Europe" \
-    America/New_York "US Eastern" \
-    America/Los_Angeles "US Pacific" \
-    UTC             "Coordinated Universal Time" \
-    __other__       "Other... (type an IANA name)") || md_abort
-  if [ "$TIMEZONE" = __other__ ]; then
-    TIMEZONE=$(tui_input "IANA timezone name (e.g. Asia/Tokyo):" "$_tz_host") || md_abort
-  fi
-  [ -n "$TIMEZONE" ] || TIMEZONE="$_tz_host"
-  # Three real answers, not two. Self-signed is a lab fallback -- no client
-  # accepts it -- so an operator who already holds a certificate must be able
-  # to say so here rather than install, discover the browser warning, and go
-  # looking for where to put their own cert.
-  if tui_yesno "Use Let's Encrypt for TLS?
+}
 
-No = supply your own certificate, or fall back to a
-self-signed lab cert."; then
-    TLS_MODE=letsencrypt
-  elif tui_yesno "Do you have your own certificate to install?
+wz_domain() { _wz_input PRIMARY_DOMAIN "Primary virtual mail domain:" "${MAIL_FQDN#*.}" required; }
+wz_extra_domains() { _wz_input EXTRA_DOMAINS "Extra virtual domains (space-separated, or blank):" ""; }
+wz_admin_email() { _wz_input ADMIN_EMAIL "Admin / PostfixAdmin superadmin email:" "postmaster@$PRIMARY_DOMAIN" required; }
 
-No = self-signed lab cert, which browsers WILL warn about."; then
-    TLS_MODE=custom
-    TLS_CUSTOM_CERT=$(tui_input "Path to your certificate (PEM; server cert first, then intermediates):" "") || md_abort
-    TLS_CUSTOM_KEY=$(tui_input "Path to its private key (PEM, not passphrase-protected):" "") || md_abort
+# Where scheduled jobs send alerts (feed refresh failures, SIEM export
+# health, neural training milestones...). Asked separately from ADMIN_EMAIL
+# because they are genuinely different roles -- the PostfixAdmin superadmin
+# is a mailbox identity, this is a human who reads operational mail, and on
+# a real deployment that is often a monitored address elsewhere. Defaults to
+# ADMIN_EMAIL so answering nothing is still correct.
+#
+# This is seeded into /etc/ilexa/alerts.conf by 55-ilexa. Before it was
+# asked, that file simply did not exist on a fresh install, so EVERY
+# cron-alert.sh notification was silently discarded until someone found the
+# setting in the console's Admin tab -- which nobody does before the first
+# failure they needed to hear about.
+wz_alert_email() { _wz_input ALERT_EMAIL "Email for system notifications/alerts (blank = none):" "$ADMIN_EMAIL"; }
+
+wz_admin_password() {
+  _wz_default ADMIN_PASSWORD ""
+  _wz_secret "PostfixAdmin superadmin password (blank = auto-generate):" \
+    "Leave it blank - generate one" "$_WZ_DEF" || return $?
+  _wz_set ADMIN_PASSWORD "$_WZ_VAL" ""
+}
+
+wz_mail_store() { _wz_input MAIL_STORE "Maildir store root:" "/data/mail"; }
+
+# Asked for explicitly: it drives the system clock, mail-log timestamps, cron
+# and every time the console displays, and silently defaulting to UTC left
+# operators reading their own logs two hours out. Defaults to whatever the
+# host is already set to, so answering nothing changes nothing.
+# Timezone: a menu of common zones plus "Other...", not a bare free-text
+# field -- reported from a live run as offering nothing selectable. The
+# host's CURRENT zone is preselected (plain Enter keeps it) and prepended so
+# it is always an option even when it is not in the common list; "Other..."
+# falls back to free text for anything else.
+wz_timezone() {
+  local s=0 host tz other v rc
+  host="$(timedatectl show -p Timezone --value 2>/dev/null || echo UTC)"
+  _wz_default TIMEZONE "$host"; tz=$_WZ_DEF; other=$host
+  # A zone typed under "Other..." last time is not in the list: preselect
+  # "Other..." and offer the typed zone there instead.
+  case " $host Europe/Budapest Europe/London Europe/Berlin America/New_York America/Los_Angeles UTC " in
+    *" $tz "*) : ;;
+    *) other=$tz; tz=__other__ ;;
+  esac
+  while true; do
+    case "$s" in
+      0) v=$(tui_choice "System timezone" \
+           "Drives the clock, mail-log timestamps and everything the console displays. The current host setting is listed first; Enter keeps the highlighted zone." \
+           "$tz" \
+           "$host" "current host setting" \
+           Europe/Budapest "Hungary (CET/CEST)" \
+           Europe/London   "UK" \
+           Europe/Berlin   "Central Europe" \
+           America/New_York "US Eastern" \
+           America/Los_Angeles "US Pacific" \
+           UTC             "Coordinated Universal Time" \
+           __other__       "Other... (type an IANA name)") || return $?
+         tz=$v
+         if [ "$tz" = __other__ ]; then s=1; else break; fi ;;
+      1) rc=0; v=$(tui_input "IANA timezone name (e.g. Asia/Tokyo):" "$other") || rc=$?
+         if [ "$rc" = 1 ]; then s=0; continue; fi
+         [ "$rc" = 0 ] || return "$rc"
+         other=$v; tz=$v; break ;;
+    esac
+  done
+  [ -n "$tz" ] || tz=$host
+  _wz_set TIMEZONE "$tz" "$host"
+}
+
+# Three real answers, not two. Self-signed is a lab fallback -- no client
+# accepts it -- so an operator who already holds a certificate must be able
+# to say so here rather than install, discover the browser warning, and go
+# looking for where to put their own cert. One menu, where this used to be two
+# chained yes/no boxes (which also could not offer Back).
+#
+# The certificate files are checked HERE, with the same test validate() applies
+# later: a mistyped path used to be found only after the review, by a die that
+# threw away every answer.
+wz_tls() {
+  local s=0 mode cert key v rc
+  _wz_default TLS_MODE letsencrypt;  mode=$_WZ_DEF
+  _wz_default TLS_CUSTOM_CERT "";    cert=$_WZ_DEF
+  _wz_default TLS_CUSTOM_KEY "";     key=$_WZ_DEF
+  while true; do
+    case "$s" in
+      0) v=$(tui_choice "" "How should this server get its TLS certificate?
+
+Self-signed is a lab fallback: no mail client or browser trusts it." "$mode" \
+           letsencrypt "$(_wz_tls_label letsencrypt)" \
+           custom      "$(_wz_tls_label custom)" \
+           selfsigned  "$(_wz_tls_label selfsigned)") || return $?
+         mode=$v
+         if [ "$mode" = custom ]; then s=1; else break; fi ;;
+      1) rc=0; v=$(tui_input "Path to your certificate (PEM; server cert first, then intermediates):" "$cert") || rc=$?
+         if [ "$rc" = 1 ]; then s=0; continue; fi
+         [ "$rc" = 0 ] || return "$rc"
+         cert=$v
+         if [ -s "$cert" ] || ! _tui_ok; then s=2; continue; fi
+         rc=0; tui_msg "Certificate not found" "\"$cert\" does not exist or is empty. Enter the path of the PEM file on THIS host." || rc=$?
+         [ "$rc" = 0 ] || [ "$rc" = 1 ] || return "$rc" ;;
+      2) rc=0; v=$(tui_input "Path to its private key (PEM, not passphrase-protected):" "$key") || rc=$?
+         if [ "$rc" = 1 ]; then s=1; continue; fi
+         [ "$rc" = 0 ] || return "$rc"
+         key=$v
+         if [ -s "$key" ] || ! _tui_ok; then break; fi
+         rc=0; tui_msg "Private key not found" "\"$key\" does not exist or is empty. Enter the path of the PEM key file on THIS host." || rc=$?
+         [ "$rc" = 0 ] || [ "$rc" = 1 ] || return "$rc" ;;
+    esac
+  done
+  _wz_set TLS_MODE "$mode" letsencrypt
+  if [ "$mode" = custom ]; then
+    _wz_set TLS_CUSTOM_CERT "$cert" ""; _wz_set TLS_CUSTOM_KEY "$key" ""
   else
-    TLS_MODE=selfsigned
+    _wz_unasked TLS_CUSTOM_CERT TLS_CUSTOM_KEY
   fi
-  SPAM_REJECT=$(tui_input "rspamd reject threshold (safety net; tag threshold is 4):" "15") || md_abort
-  GEOBLOCK_COUNTRIES=$(tui_input "Geoblock country codes:" "ru cn br kr") || md_abort
-  SSH_PORT=$(tui_input "SSH port to open in firewalld:" "22") || md_abort
-  if tui_yesno "Enable the AlienVault OTX threat-intel suite?"; then
-    ENABLE_OTX=yes
-    OTX_API_KEY=$(tui_password "OTX API key (blank = configure later):") || md_abort
-  else ENABLE_OTX=no; fi
-  SPAMHAUS_DQS_KEY=$(tui_password \
-    "Spamhaus DQS account key (blank = skip, use rspamd's default public zones):") || md_abort
+}
 
-  # Reputation feeds. Every updater is installed either way; a blank key simply
-  # leaves that source disabled, and it can be filled in later from the ilexa
-  # Admin tab without touching the installer again.
-  if tui_yesno "Enable the reputation feeds?
+wz_spam_reject() { _wz_input SPAM_REJECT "rspamd reject threshold (safety net; tag threshold is 4):" "15"; }
+wz_geoblock() { _wz_input GEOBLOCK_COUNTRIES "Geoblock country codes:" "ru cn br kr"; }
+wz_ssh_port() { _wz_input SSH_PORT "SSH port to open in firewalld:" "22"; }
 
-Spamhaus, Abusix and others, queried live per message."; then
-    ENABLE_FEEDS=yes
-    ABUSECH_API_KEY=$(tui_password \
-      "abuse.ch API key — URLhaus + ThreatFox/Feodo (blank = install disabled, set later in ilexa):") || md_abort
-    ABUSEIPDB_API_KEY=$(tui_password \
-      "AbuseIPDB API key (blank = install disabled, set later in ilexa):") || md_abort
-  else ENABLE_FEEDS=no; fi
+wz_otx() {
+  local s=0 on key v rc
+  _wz_default ENABLE_OTX yes;  on=$_WZ_DEF
+  _wz_default OTX_API_KEY "";  key=$_WZ_DEF
+  while true; do
+    case "$s" in
+      0) v=$(tui_choice "" "Enable the AlienVault OTX threat-intel suite?" "$on" \
+           yes "Yes - enable the OTX suite" \
+           no  "No") || return $?
+         on=$v
+         if [ "$on" = yes ]; then s=1; else break; fi ;;
+      1) rc=0; _wz_secret "OTX API key (blank = configure later):" \
+           "No key now - configure it later" "$key" || rc=$?
+         if [ "$rc" = 1 ]; then s=0; continue; fi
+         [ "$rc" = 0 ] || return "$rc"
+         key=$_WZ_VAL; break ;;
+    esac
+  done
+  _wz_set ENABLE_OTX "$on" yes
+  if [ "$on" = yes ]; then _wz_set OTX_API_KEY "$key" ""; else _wz_unasked OTX_API_KEY; fi
+}
 
-  # rspamd's signing key cannot be imported on some platforms (EL10). Ask
-  # rather than dying 12 minutes later inside 40-rspamd: the wizard is the
-  # default path now, and RSPAMD_ALLOW_UNSIGNED was otherwise reachable only
-  # from an answers file, which a one-liner user does not have.
-  if ! rspamd_key_importable; then
-    tui_msg "rspamd package signature" \
+wz_dqs() {
+  _wz_default SPAMHAUS_DQS_KEY ""
+  _wz_secret "Spamhaus DQS account key (blank = skip, use rspamd's default public zones):" \
+    "No key - use rspamd's default public zones" "$_WZ_DEF" || return $?
+  _wz_set SPAMHAUS_DQS_KEY "$_WZ_VAL" ""
+}
+
+# Reputation feeds. Every updater is installed either way; a blank key simply
+# leaves that source disabled, and it can be filled in later from the ilexa
+# Admin tab without touching the installer again.
+wz_feeds() {
+  local s=0 on k1 k2 v rc
+  _wz_default ENABLE_FEEDS yes;       on=$_WZ_DEF
+  _wz_default ABUSECH_API_KEY "";     k1=$_WZ_DEF
+  _wz_default ABUSEIPDB_API_KEY "";   k2=$_WZ_DEF
+  while true; do
+    case "$s" in
+      0) v=$(tui_choice "" "Enable the reputation feeds?
+
+Spamhaus, Abusix and others, queried live per message." "$on" \
+           yes "Yes - enable the reputation feeds" \
+           no  "No") || return $?
+         on=$v
+         if [ "$on" = yes ]; then s=1; else break; fi ;;
+      1) rc=0; _wz_secret "abuse.ch API key — URLhaus + ThreatFox/Feodo (blank = install disabled, set later in ilexa):" \
+           "No key - install it disabled, set it later in ilexa" "$k1" || rc=$?
+         if [ "$rc" = 1 ]; then s=0; continue; fi
+         [ "$rc" = 0 ] || return "$rc"
+         k1=$_WZ_VAL; s=2 ;;
+      2) rc=0; _wz_secret "AbuseIPDB API key (blank = install disabled, set later in ilexa):" \
+           "No key - install it disabled, set it later in ilexa" "$k2" || rc=$?
+         if [ "$rc" = 1 ]; then s=1; continue; fi
+         [ "$rc" = 0 ] || return "$rc"
+         k2=$_WZ_VAL; break ;;
+    esac
+  done
+  _wz_set ENABLE_FEEDS "$on" yes
+  if [ "$on" = yes ]; then
+    _wz_set ABUSECH_API_KEY "$k1" ""; _wz_set ABUSEIPDB_API_KEY "$k2" ""
+  else
+    _wz_unasked ABUSECH_API_KEY ABUSEIPDB_API_KEY
+  fi
+}
+
+# rspamd's signing key cannot be imported on some platforms (EL10). Ask
+# rather than dying 12 minutes later inside 40-rspamd: the wizard is the
+# default path now, and RSPAMD_ALLOW_UNSIGNED was otherwise reachable only
+# from an answers file, which a one-liner user does not have. Only in the step
+# list when the probe in collect_interactive() failed.
+wz_rspamd_unsigned() {
+  local s=0 v rc
+  while true; do
+    case "$s" in
+      0) tui_msg "rspamd package signature" \
 "This system REFUSES rspamd's package signing key.
 
 rspamd.com signs with a key whose self-signature uses SHA-1. This
@@ -303,28 +660,37 @@ Continuing means installing rspamd WITHOUT verifying its signature.
 It is still fetched over HTTPS from rspamd.com, but its authenticity
 is not checked. Nothing else in the install is affected.
 
-Declining stops here, with nothing changed."
-    if tui_yesno "Install rspamd without verifying its signature?
+Declining stops here, with nothing changed." || return $?
+         s=1 ;;
+      1) _wz_default RSPAMD_ALLOW_UNSIGNED yes
+         rc=0; v=$(tui_choice "" "Install rspamd without verifying its signature?" "$_WZ_DEF" \
+           yes "Yes - install rspamd unverified" \
+           no  "No - stop now and change nothing") || rc=$?
+         if [ "$rc" = 1 ]; then s=0; continue; fi
+         [ "$rc" = 0 ] || return "$rc"
+         [ "$v" = yes ] || return 255     # declining stops the installer, as before
+         break ;;
+    esac
+  done
+  _wz_set RSPAMD_ALLOW_UNSIGNED yes yes
+}
 
-No = stop now and change nothing."; then
-      RSPAMD_ALLOW_UNSIGNED=yes
-      log_warn "operator accepted UNVERIFIED rspamd packages (RSPAMD_ALLOW_UNSIGNED=yes)"
-    else
-      md_abort
-    fi
-  fi
-
-  # Opt-in, and the operator sees what it means first. This copies the content
-  # of everyone's mail into one admin-readable mailbox.
-  #
-  # Explainer and choice are SEPARATE dialogs on purpose: as one ~34-line
-  # yesno this overflowed tui_yesno's fixed 10x74 box, whiptail rendered it
-  # as a scrolled region, and the initially focused control was the scroll
-  # area rather than a button -- reported from a live install as "the
-  # selector should be on OK by default". A msgbox has only an OK button
-  # (focused by definition), and the yesno that follows is short enough
-  # that its Yes/No buttons render normally.
-  tui_msg "DEPLOYMENT TYPE: the central mail archive" \
+# Opt-in, and the operator sees what it means first. This copies the content
+# of everyone's mail into one admin-readable mailbox.
+#
+# Explainer and choice are SEPARATE dialogs on purpose: as one ~34-line
+# yesno this overflowed tui_yesno's fixed 10x74 box, whiptail rendered it
+# as a scrolled region, and the initially focused control was the scroll
+# area rather than a button -- reported from a live install as "the
+# selector should be on OK by default". The explainer has its buttons in
+# view, and the choice that follows is short enough to need no scrolling.
+wz_archive() {
+  local s=0 on days v rc
+  _wz_default ENABLE_ARCHIVE yes;          on=$_WZ_DEF
+  _wz_default ARCHIVE_RETENTION_DAYS 30;   days=$_WZ_DEF
+  while true; do
+    case "$s" in
+      0) tui_msg "DEPLOYMENT TYPE: the central mail archive" \
 "WITH ARCHIVE     every message is copied to one mailbox.
 WITHOUT ARCHIVE  filtering only; nothing retained centrally.
 
@@ -339,106 +705,219 @@ and most of the training signal.
 
 GDPR: it copies the CONTENT of everyone's mail into one mailbox
 admins can read. That needs a lawful basis, a retention period
-(asked next) and users told in advance."
-  if tui_yesno "Enable the central mail archive?
+(asked next) and users told in advance." || return $?
+         s=1 ;;
+      1) rc=0; v=$(tui_choice "" "Enable the central mail archive?
 
-The previous screen explains what this means, including
-the GDPR side."; then
-    ENABLE_ARCHIVE=yes
-    ARCHIVE_RETENTION_DAYS=$(tui_input "Keep archived mail for how many days?" "30") || md_abort
-  else ENABLE_ARCHIVE=no; fi
-  # Greylisting: a wizard QUESTION, not just an apply_defaults default. It is
-  # the one filtering layer with a user-visible cost -- an unknown sender's
-  # first message is delayed ~5 minutes -- so an operator serving people who
-  # expect instant password-reset and 2FA mail must be able to decline it here
-  # without editing an answers file they are not using. Yes is whiptail's
-  # default button, matching apply_defaults' ENABLE_GREYLISTING:=yes.
-  if tui_yesno "Enable greylisting (postgrey)?
-
-Defers an UNKNOWN sender's first message by ~5 minutes.
-Real servers retry and get through; much throwaway spam
-never comes back.
-
-The cost is a one-time delay on the FIRST mail from each
-new correspondent -- felt most on password resets and 2FA
-codes from senders you have not heard from before.
-
-Yes suits most sites. Choose No if any delay is
-unacceptable. Switchable later only by re-running the
-installer."; then
-    ENABLE_GREYLISTING=yes
-  else ENABLE_GREYLISTING=no; fi
-  # Default system language -- Roundcube, ilexa AND PostfixAdmin all follow it.
-  # English default; Yes is whiptail's default button, so plain Enter accepts
-  # English. Changeable any time from the console (Admin -> language), which
-  # owns the state file afterwards; all three apps read that file at runtime,
-  # so changing it there moves them together.
-  SYSTEM_LANG=$(tui_menu "Interface language" \
-    "Default language for webmail (Roundcube), the ilexa console and PostfixAdmin. Changeable later (Admin -> language); users can still pick their own in Roundcube." \
-    en \
-    en "English" \
-    hu "Magyar (Hungarian)") || md_abort
-  [ -n "$SYSTEM_LANG" ] || SYSTEM_LANG=en
-  ILEXA_LANG=$SYSTEM_LANG
-  # Password expiry: one global interval for every mailbox (PostfixAdmin's own
-  # per-domain override stays superadmin-only, unchanged, in its own UI).
-  # Radiolist default is 90 -- matches this installer's own recommended value
-  # elsewhere (see docs/GUIDE.md) and PostfixAdmin's own upstream
-  # documentation (DOCUMENTS/Password_Expiration.md) suggested example.
-  # "Never" maps to password_expiration=NO, PostfixAdmin's existing off
-  # switch -- not a new code path.
-  PASSWORD_EXPIRY_DAYS=$(tui_radiolist "Password expiry" \
-    30     "Expire passwords after 30 days"  off \
-    60     "Expire passwords after 60 days"  off \
-    90     "Expire passwords after 90 days"  on  \
-    never  "Never expire passwords"          off) || md_abort
-  local extras extra_args=()
-  extra_args=(last_login "Dovecot last-login tracking" on \
-              fts_xapian "Full-text search (compiled; RAM-heavy)" on \
-              unattended "Unattended security updates" on \
-              mx_check "rspamd: sender MX validation (needs outbound :25)" on \
-              known_senders "rspamd: per-sender freemail reputation" on)
-  # clamav-unofficial-sigs is packaged in EPEL but has NO Debian/Ubuntu
-  # package at all (checked: apt only offers "fangfrisch", a different tool
-  # with an incompatible config format). Offering the choice on apt would be
-  # offering something we cannot deliver, so the item only appears where it
-  # can actually be installed; 35-clamav logs the reason on apt.
-  if [ "${PKG_MGR:-dnf}" != apt ]; then
-    extra_args+=(unofficial_sigs "Third-party ClamAV signature sources + YARA" on)
-  fi
-  extras=$(tui_checklist "Optional extras" "${extra_args[@]}") || md_abort
-  case " $extras " in *" last_login "*) ENABLE_LAST_LOGIN=yes;; *) ENABLE_LAST_LOGIN=no;; esac
-  case " $extras " in *" fts_xapian "*) ENABLE_FTS_XAPIAN=yes;; *) ENABLE_FTS_XAPIAN=no;; esac
-  case " $extras " in *" unattended "*) ENABLE_UNATTENDED=yes;; *) ENABLE_UNATTENDED=no;; esac
-  case " $extras " in *" unofficial_sigs "*) ENABLE_UNOFFICIAL_SIGS=yes;; *) ENABLE_UNOFFICIAL_SIGS=no;; esac
-  case " $extras " in *" mx_check "*) ENABLE_MX_CHECK=yes;; *) ENABLE_MX_CHECK=no;; esac
-  case " $extras " in *" known_senders "*) ENABLE_KNOWN_SENDERS=yes;; *) ENABLE_KNOWN_SENDERS=no;; esac
-  local hard
-  local -a hard_args=(
-    ssh    "SSH key-only + sudo admin user" on
-    webmin "Webmin source-IP allowlist" on
-    reboot "Kernel auto-reboot maintenance window" on
-    smtp   "SMTP tuning (50M limit, delay_reject)" on
-  )
-  # SELinux is EL-only -- 85-hardening.sh already no-ops HARDEN_SELINUX=yes on
-  # Debian/Ubuntu with a warning ("SELinux is EL-only"), because the
-  # answers-file path can set it for any OS and that path must still fail
-  # safely. But the WIZARD offering it as a selectable item on every OS,
-  # including where it can only ever do nothing, is its own bug: reported live
-  # as "selinux is selectable on ubuntu 24, however it exists only on CentOS".
-  # Only add it to the list where it can actually do something.
-  [ "$PKG_MGR" = dnf ] && hard_args+=(selinux "SELinux enforcing (advanced)" off)
-  hard=$(tui_checklist "Hardening options (secure-by-default)" "${hard_args[@]}") || md_abort
-  case " $hard " in *" ssh "*) HARDEN_SSH_KEYONLY=yes;; *) HARDEN_SSH_KEYONLY=no;; esac
-  case " $hard " in *" webmin "*) HARDEN_WEBMIN=yes;; *) HARDEN_WEBMIN=no;; esac
-  case " $hard " in *" reboot "*) HARDEN_KERNEL_AUTOREBOOT=yes;; *) HARDEN_KERNEL_AUTOREBOOT=no;; esac
-  case " $hard " in *" smtp "*) HARDEN_SMTP_TUNING=yes;; *) HARDEN_SMTP_TUNING=no;; esac
-  if [ "$PKG_MGR" = dnf ]; then
-    case " $hard " in *" selinux "*) HARDEN_SELINUX=yes;; *) HARDEN_SELINUX=no;; esac
-  else
-    HARDEN_SELINUX=no   # not offered on this OS; nothing to opt into
-  fi
+The previous screen explains what this means, including the GDPR side." "$on" \
+           yes "Yes - copy every message to the archive mailbox" \
+           no  "No - filtering only, nothing retained") || rc=$?
+         if [ "$rc" = 1 ]; then s=0; continue; fi
+         [ "$rc" = 0 ] || return "$rc"
+         on=$v
+         if [ "$on" = yes ]; then s=2; else break; fi ;;
+      2) rc=0; v=$(tui_input "Keep archived mail for how many days?" "$days") || rc=$?
+         if [ "$rc" = 1 ]; then s=1; continue; fi
+         [ "$rc" = 0 ] || return "$rc"
+         days=$v; break ;;
+    esac
+  done
+  _wz_set ENABLE_ARCHIVE "$on" yes
+  if [ "$on" = yes ]; then _wz_set ARCHIVE_RETENTION_DAYS "$days" 30; else _wz_unasked ARCHIVE_RETENTION_DAYS; fi
 }
+
+# Greylisting: a wizard QUESTION, not just an apply_defaults default. It is
+# the one filtering layer with a user-visible cost -- an unknown sender's
+# first message is delayed ~5 minutes -- so an operator serving people who
+# expect instant password-reset and 2FA mail must be able to decline it here
+# without editing an answers file they are not using. Yes is the preselected
+# answer, matching apply_defaults' ENABLE_GREYLISTING:=yes.
+wz_greylisting() {
+  local v
+  _wz_default ENABLE_GREYLISTING yes
+  v=$(tui_choice "" "Enable greylisting (postgrey)?
+
+Defers an UNKNOWN sender's first message by ~5 minutes. Real servers retry and get through; much throwaway spam never comes back.
+
+The cost is a one-time delay on the FIRST mail from each new correspondent -- felt most on password resets and 2FA codes from senders you have not heard from before.
+
+Yes suits most sites. Choose No if any delay is unacceptable. Switchable later only by re-running the installer." "$_WZ_DEF" \
+    yes "Yes - greylist unknown senders" \
+    no  "No - accept their first message at once") || return $?
+  _wz_set ENABLE_GREYLISTING "$v" yes
+}
+
+# Default system language -- Roundcube, ilexa AND PostfixAdmin all follow it.
+# English is preselected, so plain Enter accepts English. Changeable any time
+# from the console (Admin -> language), which owns the state file afterwards;
+# all three apps read that file at runtime, so changing it there moves them
+# together.
+wz_language() {
+  local v
+  _wz_default SYSTEM_LANG en
+  v=$(tui_choice "Interface language" \
+    "Default language for webmail (Roundcube), the ilexa console and PostfixAdmin. Changeable later (Admin -> language); users can still pick their own in Roundcube." \
+    "$_WZ_DEF" \
+    en "$(_wz_lang_label en)" \
+    hu "$(_wz_lang_label hu)") || return $?
+  [ -n "$v" ] || v=en
+  _wz_set SYSTEM_LANG "$v" en
+  ILEXA_LANG=$SYSTEM_LANG
+}
+
+# Password expiry: one global interval for every mailbox (PostfixAdmin's own
+# per-domain override stays superadmin-only, unchanged, in its own UI).
+# Radiolist default is 90 -- matches this installer's own recommended value
+# elsewhere (see docs/GUIDE.md) and PostfixAdmin's own upstream
+# documentation (DOCUMENTS/Password_Expiration.md) suggested example.
+# "Never" maps to password_expiration=NO, PostfixAdmin's existing off
+# switch -- not a new code path.
+wz_pwexpiry() {
+  local v o st args=()
+  _wz_default PASSWORD_EXPIRY_DAYS 90
+  for o in 30 60 90 never; do
+    if [ "$o" = "$_WZ_DEF" ]; then st=on; else st=off; fi
+    if [ "$o" = never ]; then args+=(never "Never expire passwords" "$st")
+    else args+=("$o" "Expire passwords after $o days" "$st"); fi
+  done
+  v=$(tui_radiolist "Password expiry" "${args[@]}") || return $?
+  _wz_set PASSWORD_EXPIRY_DAYS "$v" 90
+}
+
+wz_extras() {
+  _wz_checklist "Optional extras" "${WZ_EXTRAS[@]}" || return $?
+  # Not offered on apt (see wz_init), so nothing to opt into there.
+  [ "${PKG_MGR:-dnf}" != apt ] || ENABLE_UNOFFICIAL_SIGS=no
+  return 0
+}
+
+wz_hardening() {
+  _wz_checklist "Hardening options (secure-by-default)" "${WZ_HARDENING[@]}" || return $?
+  # Not offered off EL (see wz_init), so nothing to opt into there.
+  [ "${PKG_MGR:-}" = dnf ] || HARDEN_SELINUX=no
+  return 0
+}
+
+# What the review and the Change... menu display is what will be APPLIED, not
+# the raw answer: the review runs before apply_defaults(), and a blank answer
+# there means that function's default (a blank geoblock is "ru cn br kr", a
+# blank mail store "/data/mail"). So both screens are rendered from a copy of
+# the answers that apply_defaults() itself has filled in -- one source, which
+# cannot drift from what is installed the way a second list of fallbacks would.
+#
+# Only ever inside a subshell (wz_value and review_text are subshell
+# functions): apply_defaults assigns the real variables, and generates a
+# password when none was given -- hence _WZ_PW_GIVEN is noted first.
+_wz_effective() {
+  _WZ_PW_GIVEN=${ADMIN_PASSWORD:+yes}
+  MD_LOG=/dev/null
+  apply_defaults >/dev/null 2>&1
+}
+
+# One step's answer as it will be applied, briefly -- for the Change... menu.
+wz_value() ( # step function
+  _wz_effective
+  _wz_show "$1"
+)
+_wz_show() { # step function -- the display itself; needs _wz_effective first
+  local row tag var label def n=0 on=0 tbl=()
+  case "$1" in
+    wz_fqdn)           printf '%s' "${MAIL_FQDN:-}" ;;
+    wz_domain)         printf '%s' "${PRIMARY_DOMAIN:-}" ;;
+    wz_extra_domains)  printf '%s' "${EXTRA_DOMAINS:-(none)}" ;;
+    wz_admin_email)    printf '%s' "${ADMIN_EMAIL:-}" ;;
+    wz_alert_email)    printf '%s' "${ALERT_EMAIL:-(none)}" ;;
+    wz_admin_password) if [ -n "${_WZ_PW_GIVEN:-}" ]; then printf '(entered)'; else printf '(generate one)'; fi ;;
+    wz_mail_store)     printf '%s' "${MAIL_STORE:-}" ;;
+    wz_timezone)       printf '%s' "${TIMEZONE:-}" ;;
+    wz_tls)            _wz_tls_label "${TLS_MODE:-}" ;;
+    wz_spam_reject)    printf '%s' "${SPAM_REJECT:-}" ;;
+    wz_geoblock)       printf '%s' "${GEOBLOCK_COUNTRIES:-(none)}" ;;
+    wz_ssh_port)       printf '%s' "${SSH_PORT:-}" ;;
+    wz_otx)            printf '%s' "${ENABLE_OTX:-}" ;;
+    wz_dqs)            if [ -n "${SPAMHAUS_DQS_KEY:-}" ]; then printf 'key entered'; else printf 'no key'; fi ;;
+    wz_feeds)          printf '%s' "${ENABLE_FEEDS:-}" ;;
+    wz_rspamd_unsigned) printf 'install unverified' ;;
+    wz_archive)        if [ "${ENABLE_ARCHIVE:-}" = yes ]; then printf 'yes, %s days' "${ARCHIVE_RETENTION_DAYS:-}"; else printf 'no'; fi ;;
+    wz_greylisting)    printf '%s' "${ENABLE_GREYLISTING:-}" ;;
+    wz_language)       _wz_lang_label "${SYSTEM_LANG:-}" ;;
+    wz_pwexpiry)       if [ "${PASSWORD_EXPIRY_DAYS:-}" = never ]; then printf 'never'; else printf '%s days' "${PASSWORD_EXPIRY_DAYS:-}"; fi ;;
+    wz_extras|wz_hardening)
+      if [ "$1" = wz_extras ]; then tbl=("${WZ_EXTRAS[@]}"); else tbl=("${WZ_HARDENING[@]}"); fi
+      for row in "${tbl[@]}"; do
+        IFS='|' read -r tag var label def <<<"$row"
+        n=$((n + 1)); [ "${!var:-no}" = yes ] && on=$((on + 1))
+      done
+      printf '%s of %s on' "$on" "$n" ;;
+  esac
+  return 0
+}
+
+# The review screen's text. Wizard-only: summary_text below stays the log's
+# format, unchanged, so an unattended run logs exactly what it always did.
+# Every line fits a 78-column box (72 inside it); a long value wraps under its
+# own column instead of being cut off.
+_rv() { # label value   (an empty label continues the line above)
+  local line first=1
+  while IFS= read -r line; do
+    if [ "$first" = 1 ]; then printf '%-18s%s\n' "${1:+$1:}" "$line"; first=0
+    else printf '%-18s%s\n' "" "$line"; fi
+  done < <(printf '%s\n' "$2" | fold -s -w 54)
+}
+_rv_rows() { # label row... -- a checklist, one [x]/[ ] line per offered option
+  local title="$1" row tag var label def mark
+  shift
+  for row in "$@"; do
+    IFS='|' read -r tag var label def <<<"$row"
+    if [ "${!var:-no}" = yes ]; then mark='[x]'; else mark='[ ]'; fi
+    _rv "$title" "$mark $label"; title=""
+  done
+}
+review_text() (
+  local otx feeds
+  _wz_effective
+  _rv "Mail server FQDN" "${MAIL_FQDN:-}"
+  _rv "Primary domain" "${PRIMARY_DOMAIN:-}"
+  _rv "Extra domains" "${EXTRA_DOMAINS:-(none)}"
+  _rv "Admin email" "${ADMIN_EMAIL:-}"
+  _rv "Alert email" "${ALERT_EMAIL:-(none — scheduled-job alerts disabled)}"
+  _rv "Admin password" "$(_wz_show wz_admin_password)"
+  _rv "Mail store" "${MAIL_STORE:-}"
+  _rv "Timezone" "${TIMEZONE:-}"
+  _rv "TLS certificate" "$(_wz_tls_label "${TLS_MODE:-}")"
+  if [ "${TLS_MODE:-}" = custom ]; then
+    _rv "  certificate" "${TLS_CUSTOM_CERT:-}"
+    _rv "  private key" "${TLS_CUSTOM_KEY:-}"
+  fi
+  _rv "Spam tag/reject" "${SPAM_ADD_HEADER:-} / ${SPAM_REJECT:-}"
+  _rv "Geoblock" "${GEOBLOCK_COUNTRIES:-(none)}"
+  _rv "SSH port" "${SSH_PORT:-}"
+  if [ "${ENABLE_OTX:-}" = yes ]; then
+    if [ -n "${OTX_API_KEY:-}" ]; then otx="yes (API key entered)"; else otx="yes (no API key yet - configure later)"; fi
+  else otx=no; fi
+  _rv "OTX suite" "$otx"
+  _rv "Spamhaus DQS" "$([ -n "${SPAMHAUS_DQS_KEY:-}" ] && echo "yes (key entered)" || echo "no (rspamd's default public zones)")"
+  if [ "${ENABLE_FEEDS:-}" = yes ]; then
+    feeds="yes"
+    [ -n "${ABUSECH_API_KEY:-}" ] && feeds="$feeds, abuse.ch key entered"
+    [ -n "${ABUSEIPDB_API_KEY:-}" ] && feeds="$feeds, AbuseIPDB key entered"
+  else feeds=no; fi
+  _rv "Reputation feeds" "$feeds"
+  if [ -n "${ABUSIX_API_KEY:-}" ]; then
+    _rv "Abusix" "yes (remember to allowlist this server IP in the Abusix portal)"
+  fi
+  _rv "rspamd signature" "$([ "${RSPAMD_ALLOW_UNSIGNED:-no}" = yes ] && echo 'NOT VERIFIED (RSPAMD_ALLOW_UNSIGNED=yes)' || echo verified)"
+  _rv "Mail archive" "$(_wz_show wz_archive)"
+  _rv "Greylisting" "${ENABLE_GREYLISTING:-}"
+  _rv "System language" "$(_wz_lang_label "${SYSTEM_LANG:-}") (Roundcube + ilexa + PostfixAdmin)"
+  _rv "Password expiry" "$([ "${PASSWORD_EXPIRY_DAYS:-}" = never ] && echo "never (disabled)" || echo "${PASSWORD_EXPIRY_DAYS:-} days")"
+  _rv "ilexa console" "${ENABLE_ILEXA:-} at ${ILEXA_URL_PREFIX:-}"
+  _rv_rows "Optional extras" "${WZ_EXTRAS[@]}"
+  _rv_rows "Hardening" "${WZ_HARDENING[@]}"
+  if [ -n "${BACKUP_TARGET:-}" ]; then _rv "Backups target" "$BACKUP_TARGET"; fi
+  if [ "${DRY_RUN:-0}" = 1 ]; then _rv "DRY RUN" "yes - modules only log what they would do"; fi
+  return 0
+)
 
 apply_defaults() {
   : "${MAIL_HOSTNAME:=${MAIL_FQDN%%.*}}"
@@ -891,6 +1370,10 @@ main() {
     # the wizard's ~20 prompts rather than after.
     preflight_host                            # hard-fail root/OS, warn RAM/ports/repos
     show_sysinfo                              # host-facts screen: right box? (OK to continue)
+    # The questions AND the review screen (Apply / Change... / Abort). The
+    # review used to come after save_answers below, so a wizard run that was
+    # then aborted had already written answers.effective; now nothing past
+    # this line runs until the operator has chosen Apply.
     collect_interactive
   fi
   apply_defaults
@@ -898,9 +1381,6 @@ main() {
   export_config
   save_answers          # so this host can be re-run later; see the function
   log_info "configuration:"; summary_text | while IFS= read -r l; do log_info "  $l"; done
-  if [ -z "$ANSWERS" ]; then
-    tui_review "$(summary_text)" || md_abort   # Abort button on review = clean exit
-  fi
   # Redundant with preflight_host above by design: os_detect() (inside
   # require_supported_os) does unconditional plain assignments (WEB_USER,
   # PHP_FPM_SOCK, etc.) that must still run here, AFTER apply_defaults/

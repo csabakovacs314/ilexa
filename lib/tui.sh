@@ -73,6 +73,52 @@ actsellistbox=black,lightgray
 export NEWT_COLORS
 
 : "${MD_OS_LABEL:=this host}"
+
+# ---- wizard step state --------------------------------------------------------
+# Set by tui_wizard() (bottom of this file) while one of its numbered steps is
+# on screen, and unset again before it returns. Nothing else sets them, so every
+# dialog drawn OUTSIDE a step -- the welcome and host-check screens, and
+# 75-tls-dns's DNS dialog in the middle of an install -- keeps exactly the
+# title, buttons and return codes it always had.
+#   MD_TUI_STEP        "Step 3 of 21" -- put in front of every dialog title
+#   MD_TUI_STEP_LABEL  the step's name, used as the title of dialogs with none
+#   MD_TUI_CANCEL      the cancel button: "Exit" on step 1, "Back" after it
+#   MD_TUI_BACK_TO     what Back returns to, for the key hint
+# Cleared here so a value inherited from the environment can never turn the
+# Exit button of a non-wizard screen (host check, 75-tls-dns) into a status
+# that the caller ignores.
+unset MD_TUI_STEP MD_TUI_STEP_LABEL MD_TUI_CANCEL MD_TUI_BACK_TO
+#
+# Every value-returning wrapper below puts `--` after the box type: whiptail
+# parses its positionals with popt, so a prefilled answer that starts with "-"
+# ("-foo") is read as an unknown option and whiptail exits 1 -- the Back code --
+# before drawing anything. The step would bounce straight back, every time.
+_tui_title() { # own_title -> the title to draw ("" = none)
+  local t="${1:-}"
+  if [ -n "${MD_TUI_STEP:-}" ]; then
+    t="${t:-${MD_TUI_STEP_LABEL:-}}"
+    printf '%s%s' "$MD_TUI_STEP" "${t:+: $t}"
+  else
+    printf '%s' "$t"
+  fi
+}
+_tui_cancel() { printf '%s' "${MD_TUI_CANCEL:-Exit}"; }
+# The key hints below all end "Esc = quit."; on a step with a Back button they
+# also say where Back goes. Esc itself never changes meaning.
+_tui_nav() { # hint
+  local s="$1"
+  if [ "${MD_TUI_CANCEL:-}" = Back ]; then
+    s="${s%Esc = quit.}Esc = quit, Back = ${MD_TUI_BACK_TO:-previous step}."
+  fi
+  printf '%s' "$s"
+}
+_tui_width() { # -> dialog width: terminal less a margin, 50..78
+  local cols w
+  cols=$(tput cols 2>/dev/null || echo 80)
+  w=$((cols - 6)); [ "$w" -gt 78 ] && w=78; [ "$w" -lt 50 ] && w=50
+  printf '%s' "$w"
+}
+
 # stdout is deliberately NOT required to be a terminal here. Every
 # value-returning wrapper below is invoked as FOO=$(tui_input ...), and
 # command substitution makes stdout a pipe by definition -- so a `[ -t 1 ]`
@@ -166,12 +212,17 @@ tui_msg() { # title text
     # orphan under it -- reported as text overflowing the border with improper
     # line breaks. fold -s only touches lines that are too long, so deliberate
     # short lines and blank lines survive.
-    local cols w inner lines maxh h scroll=() text
+    local cols w inner lines maxh h scroll=() text nav
     cols=$(tput cols 2>/dev/null || echo 80)
     w=$((cols - 6)); [ "$w" -gt 78 ] && w=78; [ "$w" -lt 50 ] && w=50
     inner=$((w - 6))
     text=$(printf '%s\n' "$2" | fold -s -w "$inner")
     lines=$(printf '%s\n' "$text" | wc -l)
+    # Geometry is deliberately unchanged by the wizard's longer "Back" hint:
+    # the height comes from the message alone, as it always has, so no screen
+    # that fitted a 24-line terminal starts scrolling (which would move focus
+    # off the buttons) just because its hint grew.
+    nav=$(_tui_nav "$MD_TUI_NAV_YESNO")
     maxh=$(tput lines 2>/dev/null || echo 24); maxh=$((maxh - 2))
     h=$((lines + 7))
     if [ "$h" -gt "$maxh" ]; then
@@ -184,11 +235,16 @@ tui_msg() { # title text
 $text"
     fi
     [ "$h" -lt 12 ] && h=12
-    whiptail --backtitle "$MD_TUI_BACKTITLE" --title "$1" "${scroll[@]}" \
-      --yes-button "Continue" --no-button "Exit" \
+    local rc=0
+    whiptail --backtitle "$MD_TUI_BACKTITLE" --title "$(_tui_title "$1")" "${scroll[@]}" \
+      --yes-button "Continue" --no-button "$(_tui_cancel)" \
       --yesno "$text
 
-$MD_TUI_NAV_YESNO" "$h" "$w" && return 0
+$nav" "$h" "$w" || rc=$?
+    [ "$rc" = 0 ] && return 0
+    # Inside a wizard step the engine decides what the button means (Exit on
+    # step 1, Back after it) and Esc still quits -- so hand it the status.
+    [ -n "${MD_TUI_STEP:-}" ] && return "$rc"
     md_abort            # Exit button or Esc: nothing has been changed yet
   else printf '%s: %s\n' "$1" "$2" >&2; fi
 }
@@ -202,6 +258,12 @@ $MD_TUI_NAV_YESNO" "$h" "$w" && return 0
 # button quits; nothing is modified before the review screen, so leaving is
 # always clean and needs no confirmation.
 #
+# The wizard's numbered steps (tui_wizard, below) relabel the cancel button
+# "Back" from step 2 on -- whiptail returns 1 for that button and 255 for Esc,
+# so the two stay distinct: Back goes to the previous step, Esc still quits on
+# the spot. Neither needs a dialog of its own, so the problem below cannot
+# come back through this door.
+#
 # There WAS a confirmation dialog here. It was worse than useless: whiptail
 # draws its interface on STDOUT, and the value-returning wrappers run inside
 # $( ), where stdout is a pipe -- so from a menu or an input prompt the
@@ -212,12 +274,17 @@ $MD_TUI_NAV_YESNO" "$h" "$w" && return 0
 #
 # The value-returning wrappers still cannot call exit themselves (a subshell
 # exit would leave the installer running with an empty value), so they return
-# 1 and rely on the caller's `|| md_abort` -- present on all 16 call sites.
+# whiptail's own status -- 1 for the Exit/Back button, 255 for Esc -- and the
+# caller decides: `|| md_abort` outside the wizard, the step engine inside it.
 
 MD_TUI_NAV_LIST='Up/Down moves.  SPACE ticks an entry.  TAB to the buttons.  Enter presses the GREY button.  Esc = quit.'
 MD_TUI_NAV_MENU='Up/Down chooses an item.  TAB jumps to the buttons, then Left/Right moves between them.  Enter presses the button with the GREY highlight.  Esc = quit.'
 MD_TUI_NAV_ENTRY='Type the value, then TAB to the buttons (Left/Right moves between them).  Enter presses the button with the GREY highlight.  Esc = quit.'
 MD_TUI_NAV_YESNO='Arrows/TAB move.  Enter presses the GREY button.  Esc = quit.'
+# tui_choice's hint is deliberately short: its prompts carry real explanations
+# and the box has to fit them on a 24-line terminal.
+MD_TUI_NAV_CHOICE='Up/Down picks.  Enter confirms.  TAB, then Left/Right, reaches the buttons.  Esc = quit.'
+MD_TUI_NAV_CHOICE_SHORT='Up/Down picks, Enter confirms.  Esc = quit.'
 
 tui_menu() { # title prompt default_tag  tag1 desc1 [tag2 desc2 ...]
   # A real selection list where a choice exists -- reported from a live wizard
@@ -240,28 +307,82 @@ $MD_TUI_NAV_MENU" "$h" 74 "$n" "$@" 3>&1 1>&2 2>&3); then
   else printf '%s' "$def"; fi
 }
 
-tui_input() { # prompt default   (exit status 1/255 = user chose Exit/Esc)
+# Prompt + key hint, folded to the 74-wide entry box, and the box height that
+# shows all of it. A fixed 12 rows clipped the hint once it also named Back.
+_tui_entry_text() { # prompt -> sets _TUI_TEXT and _TUI_H
+  _TUI_TEXT=$(printf '%s\n\n%s\n' "$1" "$(_tui_nav "$MD_TUI_NAV_ENTRY")" | fold -s -w 68)
+  _TUI_H=$(( $(printf '%s\n' "$_TUI_TEXT" | wc -l) + 7 ))
+  [ "$_TUI_H" -lt 12 ] && _TUI_H=12
+  return 0
+}
+
+tui_input() { # prompt default   (exit status 1 = Exit/Back button, 255 = Esc)
   local prompt="$1" def="${2:-}"
   if _tui_ok; then
-    local val
-    {
-      if val=$(whiptail --backtitle "$MD_TUI_BACKTITLE" --cancel-button "Exit" \
-        --inputbox "$prompt
-
-$MD_TUI_NAV_ENTRY" 12 74 "$def" 3>&1 1>&2 2>&3); then
-        printf '%s' "$val"; return 0
-      fi
-      return 1        # Cancel/Exit/Esc -> caller runs md_abort
-    }
+    local val rc=0 t=() title
+    title=$(_tui_title ""); [ -n "$title" ] && t=(--title "$title")
+    _tui_entry_text "$prompt"
+    val=$(whiptail --backtitle "$MD_TUI_BACKTITLE" "${t[@]}" --cancel-button "$(_tui_cancel)" \
+      --inputbox -- "$_TUI_TEXT" "$_TUI_H" 74 "$def" 3>&1 1>&2 2>&3) || rc=$?
+    [ "$rc" = 0 ] || return "$rc"   # caller: md_abort, or the wizard's Back/quit
+    printf '%s' "$val"; return 0
   else printf '%s' "$def"; fi
 }
 
-tui_password() { # prompt   (exit status 1/255 = user chose Exit/Esc)
+# No prefill parameter, on purpose: whiptail takes an initial value only as a
+# command-line argument, and a password or API key on a command line is
+# readable by every local user through /proc/<pid>/cmdline for as long as the
+# dialog is open. A wizard step revisited with Back offers "keep the one
+# entered before" as a separate choice instead (see _wz_secret in deploy.sh).
+tui_password() { # prompt   (exit status 1 = Exit/Back button, 255 = Esc)
   local prompt="$1"
   if _tui_ok; then
-    whiptail --backtitle "$MD_TUI_BACKTITLE" --cancel-button "Exit" \
-      --passwordbox "$prompt" 10 74 3>&1 1>&2 2>&3
+    local t=() title
+    title=$(_tui_title ""); [ -n "$title" ] && t=(--title "$title")
+    _tui_entry_text "$prompt"
+    whiptail --backtitle "$MD_TUI_BACKTITLE" "${t[@]}" --cancel-button "$(_tui_cancel)" \
+      --passwordbox -- "$_TUI_TEXT" "$_TUI_H" 74 3>&1 1>&2 2>&3
   else printf ''; fi
+}
+
+# tui_choice "title" "prompt" default_tag  tag1 desc1 [tag2 desc2 ...]
+# A question with a few fixed answers, drawn as a menu: echoes the chosen tag.
+# The wizard asks its yes/no questions with this rather than tui_yesno because
+# a yes/no box has exactly two buttons and both are answers -- there is no
+# third button for Back. Unlike tui_menu, the height follows the prompt, so a
+# question that carries a real explanation is not clipped; on a terminal too
+# short for it the text scrolls, and the hint says how to reach the list.
+tui_choice() {
+  local title="$1" prompt="$2" def="$3"; shift 3
+  if _tui_ok; then
+    local w inner text lines n lh h maxh val rc=0 scroll=() t=() hint
+    w=$(_tui_width); inner=$((w - 6))
+    n=$(( $# / 2 )); lh=$n; [ "$lh" -gt 10 ] && lh=10
+    maxh=$(tput lines 2>/dev/null || echo 24); maxh=$((maxh - 2))
+    # Scrolling moves focus onto the text, where Enter does nothing -- so when
+    # the full hint is what makes the box too tall, try the one-line hint
+    # first, and only scroll if even that does not fit.
+    for hint in "$MD_TUI_NAV_CHOICE" "$MD_TUI_NAV_CHOICE_SHORT"; do
+      text=$(printf '%s\n\n%s\n' "$prompt" "$(_tui_nav "$hint")" | fold -s -w "$inner")
+      lines=$(printf '%s\n' "$text" | wc -l)
+      h=$((lines + lh + 7))
+      [ "$h" -le "$maxh" ] && break
+    done
+    if [ "$h" -gt "$maxh" ]; then
+      text=$(printf '%s\n\n%s\n' "$prompt" "$(_tui_nav "$MD_TUI_NAV_CHOICE")" | fold -s -w "$inner")
+      h=$maxh; scroll=(--scrolltext)
+      text="(text scrolls: UP/DOWN reads it, TAB moves to the answers)
+
+$text"
+    fi
+    [ "$h" -lt $((lh + 9)) ] && h=$((lh + 9))
+    title=$(_tui_title "$title"); [ -n "$title" ] && t=(--title "$title")
+    val=$(whiptail --backtitle "$MD_TUI_BACKTITLE" "${t[@]}" "${scroll[@]}" \
+      --cancel-button "$(_tui_cancel)" --default-item "$def" \
+      --menu -- "$text" "$h" "$w" "$lh" "$@" 3>&1 1>&2 2>&3) || rc=$?
+    [ "$rc" = 0 ] || return "$rc"
+    printf '%s' "$val"; return 0
+  else printf '%s' "$def"; fi
 }
 
 tui_yesno() { # prompt  -> returns 0 for yes, 1 for no
@@ -312,13 +433,14 @@ tui_radiolist() {
     h=$((lh + 12))
     local maxh; maxh=$(tput lines 2>/dev/null || echo 24); maxh=$((maxh - 2))
     [ "$h" -gt "$maxh" ] && { h=$maxh; lh=$((h - 12)); [ "$lh" -lt 3 ] && lh=3; }
-    if val=$(whiptail --backtitle "$MD_TUI_BACKTITLE" --title "$title" --cancel-button "Exit" \
-      --radiolist "Select with SPACE, confirm with ENTER
+    local rc=0
+    val=$(whiptail --backtitle "$MD_TUI_BACKTITLE" --title "$(_tui_title "$title")" \
+      --cancel-button "$(_tui_cancel)" \
+      --radiolist -- "Select with SPACE, confirm with ENTER
 
-$MD_TUI_NAV_LIST" "$h" "$w" "$lh" "${args[@]}" 3>&1 1>&2 2>&3); then
-      printf '%s' "${val//\"/}"; return 0
-    fi
-    return 1        # Exit/Esc -> caller runs md_abort
+$(_tui_nav "$MD_TUI_NAV_LIST")" "$h" "$w" "$lh" "${args[@]}" 3>&1 1>&2 2>&3) || rc=$?
+    [ "$rc" = 0 ] || return "$rc"   # 1 = Exit/Back button, 255 = Esc
+    printf '%s' "${val//\"/}"; return 0
   else
     while [ $# -ge 3 ]; do [ "$3" = on ] && { printf '%s' "$1"; break; }; shift 3; done
   fi
@@ -341,24 +463,141 @@ tui_checklist() {
     h=$((lh + 12))
     local maxh; maxh=$(tput lines 2>/dev/null || echo 24); maxh=$((maxh - 2))
     [ "$h" -gt "$maxh" ] && { h=$maxh; lh=$((h - 12)); [ "$lh" -lt 3 ] && lh=3; }
-    if val=$(whiptail --backtitle "$MD_TUI_BACKTITLE" --title "$title" --cancel-button "Exit" \
-      --checklist "Select with SPACE, confirm with ENTER
+    local rc=0
+    val=$(whiptail --backtitle "$MD_TUI_BACKTITLE" --title "$(_tui_title "$title")" \
+      --cancel-button "$(_tui_cancel)" \
+      --checklist -- "Select with SPACE, confirm with ENTER
 
-$MD_TUI_NAV_LIST" "$h" "$w" "$lh" "${args[@]}" 3>&1 1>&2 2>&3); then
-      printf '%s' "${val//\"/}"; return 0
-    fi
-    return 1        # Exit/Esc -> caller runs md_abort
+$(_tui_nav "$MD_TUI_NAV_LIST")" "$h" "$w" "$lh" "${args[@]}" 3>&1 1>&2 2>&3) || rc=$?
+    [ "$rc" = 0 ] || return "$rc"   # 1 = Exit/Back button, 255 = Esc
+    printf '%s' "${val//\"/}"; return 0
   else
     while [ $# -ge 3 ]; do [ "$3" = on ] && printf '%s ' "$1"; shift 3; done
   fi
 }
 
-# tui_review "text" -> show final confirmation; returns 0 to proceed
+# tui_review "text" -> echoes apply | change | abort (always exit status 0)
+# The last screen before anything is changed. Three real answers, so a menu
+# rather than a yes/no box: "Change..." is what spares an operator re-running
+# all ~20 questions over one typo. The Abort button and Esc both mean abort.
+# The old fixed 24x78 box also clipped its last lines (hardening, backups,
+# dry-run) without any sign there was more; the height now follows the text,
+# and a terminal too short for it scrolls the text instead.
+# Without a usable terminal it prints the text and answers "apply", which is
+# what the old yes/no version returned there too.
 tui_review() {
   if _tui_ok; then
-    whiptail --backtitle "$MD_TUI_BACKTITLE" --title "Review — apply these changes?" \
-      --yesno "$1" 24 78 --yes-button "Apply" --no-button "Abort"
+    local cols w inner text lines h maxh val rc=0 scroll=()
+    cols=$(tput cols 2>/dev/null || echo 80)
+    w=$((cols - 2)); [ "$w" -gt 78 ] && w=78; [ "$w" -lt 50 ] && w=50
+    inner=$((w - 6))
+    text=$(printf '%s\n\nNothing has been changed yet.  %s\n' "$1" "$MD_TUI_NAV_CHOICE" | fold -s -w "$inner")
+    lines=$(printf '%s\n' "$text" | wc -l)
+    h=$((lines + 3 + 7))
+    maxh=$(tput lines 2>/dev/null || echo 24); maxh=$((maxh - 2))
+    if [ "$h" -gt "$maxh" ]; then
+      h=$maxh; scroll=(--scrolltext)
+      text="(text scrolls: UP/DOWN reads it, TAB moves to the answers)
+
+$text"
+    fi
+    [ "$h" -lt 12 ] && h=12
+    val=$(whiptail --backtitle "$MD_TUI_BACKTITLE" --title "Review — apply these changes?" \
+      "${scroll[@]}" --cancel-button "Abort" --default-item apply \
+      --menu -- "$text" "$h" "$w" 3 \
+      apply  "Apply - install with these answers" \
+      change "Change an answer..." \
+      abort  "Abort - exit, nothing has been changed" 3>&1 1>&2 2>&3) || rc=$?
+    [ "$rc" = 0 ] || val=abort
+    case "$val" in apply|change) printf '%s' "$val" ;; *) printf 'abort' ;; esac
+    return 0
   else
-    printf '%s\n' "$1" >&2; return 0
+    printf '%s\n' "$1" >&2; printf 'apply'; return 0
   fi
+}
+
+# ---- the wizard engine -------------------------------------------------------
+# tui_wizard REVIEW_FN [VALUE_FN [AFTER_CHANGE_FN]]
+#   Steps come from the caller's array MD_WZ_STEPS=("function|Label" ...), in
+#   order. A step function asks its question(s) and returns 0 (answered: go
+#   on), 1 (its Back/Exit button) or anything else (quit). Prefilling a
+#   revisited step with the earlier answer is the step's own job.
+#   REVIEW_FN prints the review text; it is called afresh on every review.
+#   VALUE_FN, given a step function's name, prints that answer briefly for the
+#   Change... menu.
+#   AFTER_CHANGE_FN runs after a step changed from the review was answered, so
+#   the caller can carry the change on to answers derived from it.
+# Walks the steps -- Back goes one step back, Exit on step 1 or Esc anywhere
+# quits -- then loops on the review: Apply returns 0, Change... re-runs one
+# chosen step and comes back to the review, Abort/Esc returns 255 (the caller
+# runs md_abort). Every step dialog is titled "Step n of N: ..." where N is the
+# number of entries in MD_WZ_STEPS, so a step the caller leaves out on this
+# host is not counted.
+#
+# Without a usable terminal every wrapper returns its default immediately, so
+# the walk runs straight through once; a non-zero step there quits rather than
+# going Back, which could otherwise bounce between two steps forever.
+tui_wizard() {
+  local review_fn="$1" value_fn="${2:-}" after_fn="${3:-}" n=${#MD_WZ_STEPS[@]} i=0 rc act pick=1 p
+  while [ "$i" -lt "$n" ]; do
+    rc=0; _tui_wz_run "$i" "$n" walk || rc=$?
+    if [ "$rc" = 0 ]; then
+      i=$((i + 1))
+    elif [ "$rc" = 1 ] && [ "$i" -gt 0 ] && _tui_ok; then
+      i=$((i - 1))
+    else
+      _tui_wz_clear; return 255
+    fi
+  done
+  while true; do
+    _tui_wz_clear
+    act=$(tui_review "$("$review_fn")")
+    case "$act" in
+      apply) return 0 ;;
+      change)
+        rc=0; p=$(_tui_wz_pick "$value_fn" "$pick") || rc=$?
+        _tui_wz_clear
+        [ "$rc" = 1 ] && continue                # Back: straight to the review
+        [ "$rc" = 0 ] || return 255
+        pick=$p
+        rc=0; _tui_wz_run $((pick - 1)) "$n" change || rc=$?
+        # 0 = changed, 1 = Back out of the step with its answer untouched;
+        # either way the review comes next. Esc inside the step quits.
+        [ "$rc" = 0 ] || [ "$rc" = 1 ] || { _tui_wz_clear; return 255; }
+        if [ "$rc" = 0 ] && [ -n "$after_fn" ]; then "$after_fn"; fi
+        ;;
+      *) return 255 ;;
+    esac
+  done
+}
+
+_tui_wz_run() { # index total walk|change -> the step function's status
+  local spec="${MD_WZ_STEPS[$1]}"
+  MD_TUI_STEP="Step $(($1 + 1)) of $2"
+  MD_TUI_STEP_LABEL="${spec#*|}"
+  if [ "$3" = change ]; then
+    MD_TUI_CANCEL=Back; MD_TUI_BACK_TO="the review"
+  elif [ "$1" -eq 0 ]; then
+    MD_TUI_CANCEL=Exit; MD_TUI_BACK_TO=""
+  else
+    MD_TUI_CANCEL=Back; MD_TUI_BACK_TO="previous step"
+  fi
+  "${spec%%|*}"
+}
+
+_tui_wz_clear() { unset MD_TUI_STEP MD_TUI_STEP_LABEL MD_TUI_CANCEL MD_TUI_BACK_TO; }
+
+_tui_wz_pick() { # value_fn default_number -> echoes the 1-based step number
+  local value_fn="$1" def="${2:-1}" i spec label v d args=()
+  for i in "${!MD_WZ_STEPS[@]}"; do
+    spec="${MD_WZ_STEPS[$i]}"; label="${spec#*|}"; v=""
+    [ -n "$value_fn" ] && v=$("$value_fn" "${spec%%|*}" 2>/dev/null)
+    d=$(printf '%-22s %s' "$label" "$v")
+    [ "${#d}" -gt 56 ] && d="${d:0:53}..."
+    args+=("$((i + 1))" "$d")
+  done
+  MD_TUI_CANCEL=Back; MD_TUI_BACK_TO="the review"
+  tui_choice "Change an answer" \
+    "Pick the answer to change. Its step opens with the current answer filled in; finishing it, or pressing Back there, returns to the review." \
+    "$def" "${args[@]}"
 }
