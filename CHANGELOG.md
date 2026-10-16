@@ -3,6 +3,11 @@
 Console releases, newest first. Generated from `RELEASES.json` by
 `tools/gen-changelog.py` -- edit the notes there, not here.
 
+## 1.0.31 (Tisza) — 2026-10-16
+`security`
+
+Security release: also carries the 1.0.30 Postfix network-card relay guard for hosts that have not applied it. The security-release alert email is now actually sent. Under the update checker C locale the mail program refused the non-ASCII text of the message, so no alert was ever delivered while the console recorded each one as sent. It now sends under a UTF-8 locale, falls back to sendmail with a declared charset, and records an alert as sent only when sending succeeded, retrying on the next check otherwise.
+
 ## 1.0.30 (Tisza) — 2026-10-16
 `security`
 
