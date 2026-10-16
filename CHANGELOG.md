@@ -3,6 +3,11 @@
 Console releases, newest first. Generated from `RELEASES.json` by
 `tools/gen-changelog.py` -- edit the notes there, not here.
 
+## 1.0.32 (Tisza) — 2026-10-16
+`fix` · **requires a full installer run**
+
+Installer-side fix. Forwarded mail whose rewritten (SRS) sender address is longer than 100 characters, typical of newsletter bounce addresses, was refused by T-Online (t-email.hu) with a misleading "Domain has no MXes" error, retried for five days and expired. Such senders are now rewritten to postmaster at the SRS domain as the mail leaves the server. No console code changed. To pick it up on an existing host, re-run the SRS step: delete /var/lib/ilexa-install/state/22-srs.done, then run deploy.sh --only 22-srs --answers <your answers file>.
+
 ## 1.0.31 (Tisza) — 2026-10-16
 `security`
 

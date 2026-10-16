@@ -122,13 +122,41 @@ case "$VA" in
   *) VA="$VA, pcre:/etc/postfix/srs_accept.pcre" ;;
 esac
 
+# --- over-long SRS senders ---------------------------------------------------
+# An SRS address wraps the original sender, so an already-long one (an ESP's
+# VERP bounce address) gets longer still. mx.t-online.hu temp-fails a MAIL FROM
+# whose local part is over 100 characters, with a misleading "451 4.1.8 Sender
+# address rejected: Domain has no MXes". On the reference host every forward
+# there with <=100 was delivered (685) and every one with 101+ retried for five
+# days and expired (5); Gmail took up to 110. postsrsd 1.x has no short form
+# (2.x's database mode does, but EL9 ships 1.12).
+#
+# So only those addresses, and only as mail leaves by SMTP, are rewritten to
+# postmaster@ the SRS domain. The queued message keeps its SRS sender, so a
+# rejection DURING the SMTP session still bounces back through SRS to the
+# original sender; only a bounce the remote sends later reaches postmaster.
+# "SRS0=" + 96 = a 101-character local part.
+write_file /etc/postfix/srs_overlong.pcre 0644 root:root <<EOF
+# Managed by ilexa-installer (modules/22-srs.sh) — see there for why.
+/^SRS[01][=+-][^@]{96,}@${SRS_DOMAIN//./\\.}\$/	postmaster@${SRS_DOMAIN}
+EOF
+
+# Appended, so an administrator's own generic map still wins (first match).
+GM=$(postconf -h smtp_generic_maps)
+case "$GM" in
+  *srs_overlong.pcre*) ;;
+  "") GM="pcre:/etc/postfix/srs_overlong.pcre" ;;
+  *)  GM="$GM, pcre:/etc/postfix/srs_overlong.pcre" ;;
+esac
+
 # One -e, then every assignment: postconf's -e is a MODE flag, and repeating it
 # fails the whole call.
 postconf -e "sender_canonical_maps = tcp:127.0.0.1:10001" \
             "sender_canonical_classes = envelope_sender" \
             "recipient_canonical_maps = tcp:127.0.0.1:10002" \
             "recipient_canonical_classes = envelope_recipient,header_recipient" \
-            "virtual_alias_maps = $VA"
+            "virtual_alias_maps = $VA" \
+            "smtp_generic_maps = $GM"
 
 install -m 755 "$MD_ASSETS/postfix/srs-sync.sh" /usr/local/sbin/srs-sync.sh
 

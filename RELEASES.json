@@ -1,8 +1,30 @@
 {
     "schema": 1,
-    "serial": 32,
+    "serial": 33,
     "channel": "stable",
     "releases": [
+        {
+            "version": "1.0.32",
+            "codename": "Tisza",
+            "tag": "v1.0.32",
+            "released_at": "2026-10-16",
+            "commit": "e2cb43c",
+            "severity": "fix",
+            "requires_installer": true,
+            "min_upgrade_from": "0.0.0",
+            "schema_version": {
+                "mysql": 1,
+                "iocs": 2,
+                "logins": 3
+            },
+            "app_tarball": {
+                "path": "assets/ilexa-app.tar.gz",
+                "sha256": "ccc121ea481b0adae0da08bd6630fce9d4d66c4b8b89fc86feb637cb0c413d69",
+                "size": 2014376
+            },
+            "notes_hu": "Telep\u00edt\u0151-oldali jav\u00edt\u00e1s. Az \u00e1tir\u00e1ny\u00edtott levelek, amelyek \u00e1t\u00edrt (SRS) felad\u00f3c\u00edme 100 karaktern\u00e9l hosszabb \u2013 jellemz\u0151en h\u00edrlevelek visszapattan\u00e1si c\u00edmei \u2013, a T-Online-n\u00e1l (t-email.hu) f\u00e9lrevezet\u0151 \u201eDomain has no MXes\u201d hib\u00e1t kaptak, \u00f6t napig \u00fajrapr\u00f3b\u00e1lkoztak, majd lej\u00e1rtak. Az ilyen felad\u00f3c\u00edmet a szerver most a lev\u00e9l kik\u00fcld\u00e9sekor az SRS-tartom\u00e1ny postmaster c\u00edm\u00e9re \u00edrja \u00e1t. A konzol k\u00f3dja nem v\u00e1ltozott. Megl\u00e9v\u0151 g\u00e9pen az SRS-l\u00e9p\u00e9st kell \u00fajrafuttatni: t\u00f6r\u00f6ld a /var/lib/ilexa-install/state/22-srs.done f\u00e1jlt, majd futtasd: deploy.sh --only 22-srs --answers <v\u00e1laszf\u00e1jl>.",
+            "notes_en": "Installer-side fix. Forwarded mail whose rewritten (SRS) sender address is longer than 100 characters, typical of newsletter bounce addresses, was refused by T-Online (t-email.hu) with a misleading \"Domain has no MXes\" error, retried for five days and expired. Such senders are now rewritten to postmaster at the SRS domain as the mail leaves the server. No console code changed. To pick it up on an existing host, re-run the SRS step: delete /var/lib/ilexa-install/state/22-srs.done, then run deploy.sh --only 22-srs --answers <your answers file>."
+        },
         {
             "version": "1.0.31",
             "codename": "Tisza",
@@ -642,6 +664,6 @@
             "notes_en": "Baseline release: version display, update checking, database migration framework."
         }
     ],
-    "latest": "1.0.31",
-    "generated_at": "2026-10-16T13:07:48Z"
+    "latest": "1.0.32",
+    "generated_at": "2026-10-16T18:00:46Z"
 }
