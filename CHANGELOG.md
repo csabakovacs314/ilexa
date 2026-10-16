@@ -3,6 +3,11 @@
 Console releases, newest first. Generated from `RELEASES.json` by
 `tools/gen-changelog.py` -- edit the notes there, not here.
 
+## 1.0.30 (Tisza) — 2026-10-16
+`security`
+
+Security release. The Postfix network card can no longer open a relay: mynetworks refuses public ranges broader than /16 (IPv6: /48) and more than one /16 of public ranges in total, and relay_domains accepts only domain names and $mydestination (no top-level domains, static:all or line breaks). Both the console and its helper check it. The card can now also save the installer IPv6 default ([::1]/128).
+
 ## 1.0.29 (Tisza) — 2026-10-14
 `security`
 

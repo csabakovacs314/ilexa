@@ -1,8 +1,30 @@
 {
     "schema": 1,
-    "serial": 30,
+    "serial": 31,
     "channel": "stable",
     "releases": [
+        {
+            "version": "1.0.30",
+            "codename": "Tisza",
+            "tag": "v1.0.30",
+            "released_at": "2026-10-16",
+            "commit": "84dde7a",
+            "severity": "security",
+            "requires_installer": false,
+            "min_upgrade_from": "0.0.0",
+            "schema_version": {
+                "mysql": 1,
+                "iocs": 2,
+                "logins": 3
+            },
+            "app_tarball": {
+                "path": "assets/ilexa-app.tar.gz",
+                "sha256": "7f5d2f6f7766cab38c04d5a33778ec284f0090cf0954128ee545f931256a5c52",
+                "size": 2011000
+            },
+            "notes_hu": "Biztons\u00e1gi kiad\u00e1s. A Postfix h\u00e1l\u00f3zati k\u00e1rty\u00e1ja t\u00f6bb\u00e9 nem nyithat rel\u00e9t: a mynetworks nem fogad el /16-n\u00e1l (IPv6: /48) t\u00e1gabb nyilv\u00e1nos tartom\u00e1nyt, a nyilv\u00e1nos tartom\u00e1nyok egy\u00fctt legfeljebb egy /16-ot fedhetnek le, a relay_domains pedig csak tartom\u00e1nyneveket \u00e9s $mydestination-t fogad el (legfels\u0151 szint\u0171 tartom\u00e1nyt, static:all-t vagy sort\u00f6r\u00e9st nem). A konzol \u00e9s a seg\u00e9dszkript is ellen\u0151rzi. A k\u00e1rtya mostant\u00f3l a telep\u00edt\u0151 IPv6-os alap\u00e9rt\u00e9k\u00e9t ([::1]/128) is el tudja menteni.",
+            "notes_en": "Security release. The Postfix network card can no longer open a relay: mynetworks refuses public ranges broader than /16 (IPv6: /48) and more than one /16 of public ranges in total, and relay_domains accepts only domain names and $mydestination (no top-level domains, static:all or line breaks). Both the console and its helper check it. The card can now also save the installer IPv6 default ([::1]/128)."
+        },
         {
             "version": "1.0.29",
             "codename": "Tisza",
@@ -598,6 +620,6 @@
             "notes_en": "Baseline release: version display, update checking, database migration framework."
         }
     ],
-    "latest": "1.0.29",
-    "generated_at": "2026-10-14T16:37:39Z"
+    "latest": "1.0.30",
+    "generated_at": "2026-10-16T06:34:04Z"
 }
