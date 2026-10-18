@@ -423,6 +423,7 @@ place rather than in the two dozen files that reference them.
 | `/var/lib/ilexa/geoip/` | 0755 root:root | Downloaded ipdeny country zone files (`ru.zone`, `cn.zone`, …). |
 | `/var/lib/ilexa-install/state/` | 0755 root:root | Per-module `.done` markers and `secrets.env` (0600) for cross-module values. |
 | `/var/lib/ilexa-install/backups/` | 0755 root:root | Every file the installer overwrote, named after its full original path. Backups are **not** left beside the original, so directories that are read wholesale (`/etc/cron.d`, `/etc/rspamd/local.d`) stay free of stray files. |
+| `/var/log/ilexa/` | 0750 root:root | Logs of the jobs that run as root: `hu-classify-report.log`, `indexer.log`, `retention.log`. Never inside the web user's `/var/log/quarantine-admin`, where a root append would follow a symlink the web user had planted. |
 | `/var/log/ilexa-install.log` | 0644 root:root | The install log. **World-readable — never write a credential here.** |
 | `/root/` | 0600 / 0644 | Operator output only: `ilexa-install-credentials.txt` (0600) and the generated `mail-deploy-dkim-dns.txt` / `mail-deploy-dns-extra.txt`. |
 

@@ -1,8 +1,30 @@
 {
     "schema": 1,
-    "serial": 33,
+    "serial": 34,
     "channel": "stable",
     "releases": [
+        {
+            "version": "1.0.33",
+            "codename": "Tisza",
+            "tag": "v1.0.33",
+            "released_at": "2026-10-18",
+            "commit": "4188f3d",
+            "severity": "security",
+            "requires_installer": true,
+            "min_upgrade_from": "0.0.0",
+            "schema_version": {
+                "mysql": 1,
+                "iocs": 2,
+                "logins": 3
+            },
+            "app_tarball": {
+                "path": "assets/ilexa-app.tar.gz",
+                "sha256": "39d9cfbbdc309c78abe8b0c688fb2bb18048069277dc673d8ec3204e0f653731",
+                "size": 2014531
+            },
+            "notes_hu": "Biztons\u00e1gi jav\u00edt\u00e1s: a rootk\u00e9nt fut\u00f3 feladatok (nyelvi oszt\u00e1lyoz\u00f3 jelent\u00e9s, arch\u00edvum-indexel\u0151 \u00e9s -meg\u0151rz\u00e9s) a webes felhaszn\u00e1l\u00f3 napl\u00f3k\u00f6nyvt\u00e1ra helyett a root tulajdon\u00fa /var/log/ilexa k\u00f6nyvt\u00e1rba napl\u00f3znak, \u00edgy a webes felhaszn\u00e1l\u00f3 szimbolikus hivatkoz\u00e1ssal nem ir\u00e1ny\u00edthatja root \u00edr\u00e1s\u00e1t m\u00e1s f\u00e1jlba. Ezzel a heti logrotate-hiba is megsz\u0171nik. Telep\u00edt\u0151 sz\u00fcks\u00e9ges: futtassa \u00fajra a 41-hu-classify, 55-ilexa \u00e9s 57-archive modulokat.",
+            "notes_en": "Security fix: jobs that run as root (language-classifier report, archive indexer and retention) now log to root-owned /var/log/ilexa instead of the web user's log directory, so the web user can no longer redirect a root write into another file through a symlink. This also ends a weekly logrotate failure. Requires the installer: re-run modules 41-hu-classify, 55-ilexa and 57-archive."
+        },
         {
             "version": "1.0.32",
             "codename": "Tisza",
@@ -664,6 +686,6 @@
             "notes_en": "Baseline release: version display, update checking, database migration framework."
         }
     ],
-    "latest": "1.0.32",
-    "generated_at": "2026-10-16T18:00:46Z"
+    "latest": "1.0.33",
+    "generated_at": "2026-10-18T22:02:32Z"
 }

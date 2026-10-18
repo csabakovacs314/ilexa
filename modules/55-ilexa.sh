@@ -497,7 +497,30 @@ write_file /etc/logrotate.d/ilexa 0644 root:root <<EOF
     create 640 ${WEB_USER} ${WEB_GROUP}
     su ${WEB_USER} ${WEB_GROUP}
 }
+
+# Logs of jobs that run as root (41-hu-classify, 57-archive, and
+# qa-hu-classify.sh measure). Root-owned directory, so root rotation is safe.
+/var/log/ilexa/*.log {
+    su root root
+    weekly
+    rotate 12
+    compress
+    delaycompress
+    missingok
+    notifempty
+    create 640 root root
+}
 EOF
+
+# Before 1.0.33 those root jobs wrote into /var/log/quarantine-admin, so an
+# existing host can have root-owned files there. The stanza above rotates that
+# directory as the web user, which cannot compress a root-owned file, so
+# logrotate failed every week (reference host: since 2026-08-30). Hand them
+# back to the web user. -type f and chown -h so a symlink is never followed.
+if [ "$DRY_RUN" != 1 ] && [ -d /var/log/quarantine-admin ]; then
+  find /var/log/quarantine-admin -maxdepth 1 -type f -user root \
+    -exec chown -h "$WEB_USER:$WEB_GROUP" {} + 2>/dev/null || true
+fi
 
 # SIEM export's impstats output (qa-siem-config.sh, only written while SIEM
 # export is enabled) -- copytruncate because rsyslog holds the file open for

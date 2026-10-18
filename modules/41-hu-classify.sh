@@ -122,13 +122,19 @@ fi
 # MAILTO="" because cron mailing the job's OUTPUT would bypass the console's
 # own recipient setting entirely; the script addresses its own send, and
 # cron-alert.sh covers the separate case of the job itself failing.
+#
+# The log lives in root-owned /var/log/ilexa, not the web user's
+# /var/log/quarantine-admin: a root append there follows any symlink the web
+# user plants, and a root-created file there breaks that directory's logrotate
+# stanza, which rotates as the web user (see 55-ilexa).
+[ "$DRY_RUN" = 1 ] || install -d -m 0750 -o root -g root /var/log/ilexa
 write_file /etc/cron.d/qa-hu-classify-report 0644 root:root <<EOF
 # Fortnightly review of the experimental language-classifier signals.
 # Recipient is set on the console's Rendszer page; with none set there it
 # falls back to /etc/ilexa/alerts.conf, and with neither it sends nothing.
 MAILTO=""
 CRON_ALERT_STATE_DIR=/var/cache/quarantine-admin
-40 4 1,15 * * root /usr/bin/cron-alert.sh hu-classify-report $VENV/bin/python3 /usr/local/sbin/qa-hu-classify-report.py >> /var/log/quarantine-admin/hu-classify-report.log 2>&1
+40 4 1,15 * * root /usr/bin/cron-alert.sh hu-classify-report $VENV/bin/python3 /usr/local/sbin/qa-hu-classify-report.py >> /var/log/ilexa/hu-classify-report.log 2>&1
 EOF
 
 # Seed the report recipient from the answers file, seed-once. Never

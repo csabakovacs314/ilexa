@@ -115,6 +115,9 @@ if [ "$DRY_RUN" != 1 ]; then
   log_info "always_bcc = $ARCHIVE_USER (rollback: postconf -e 'always_bcc=' && systemctl reload postfix)"
 fi
 
+# Both jobs run as root, so they log to root-owned /var/log/ilexa rather than
+# the web user's /var/log/quarantine-admin -- see 41-hu-classify for why.
+[ "$DRY_RUN" = 1 ] || install -d -m 0750 -o root -g root /var/log/ilexa
 write_file /etc/cron.d/ilexa-archive 0644 root:root <<EOF
 # Central archive: incremental index every 3 minutes, retention nightly.
 SHELL=/bin/bash
@@ -124,8 +127,8 @@ PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
 # cron-alert.sh, which reads /etc/ilexa/alerts.conf and stays silent until an
 # address is configured in the Admin tab.
 MAILTO=""
-*/3 * * * * root /usr/bin/php /usr/local/bin/archive-indexer.php >> /var/log/quarantine-admin/indexer.log 2>&1
-15 3 * * *  root /usr/local/bin/archive-retention.sh >> /var/log/quarantine-admin/retention.log 2>&1
+*/3 * * * * root /usr/bin/php /usr/local/bin/archive-indexer.php >> /var/log/ilexa/indexer.log 2>&1
+15 3 * * *  root /usr/local/bin/archive-retention.sh >> /var/log/ilexa/retention.log 2>&1
 EOF
 
 mark_done 57-archive

@@ -3,6 +3,11 @@
 Console releases, newest first. Generated from `RELEASES.json` by
 `tools/gen-changelog.py` -- edit the notes there, not here.
 
+## 1.0.33 (Tisza) — 2026-10-18
+`security` · **requires a full installer run**
+
+Security fix: jobs that run as root (language-classifier report, archive indexer and retention) now log to root-owned /var/log/ilexa instead of the web user's log directory, so the web user can no longer redirect a root write into another file through a symlink. This also ends a weekly logrotate failure. Requires the installer: re-run modules 41-hu-classify, 55-ilexa and 57-archive.
+
 ## 1.0.32 (Tisza) — 2026-10-16
 `fix` · **requires a full installer run**
 
