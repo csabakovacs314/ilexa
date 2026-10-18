@@ -3,6 +3,11 @@
 Console releases, newest first. Generated from `RELEASES.json` by
 `tools/gen-changelog.py` -- edit the notes there, not here.
 
+## 1.0.34 (Tisza) — 2026-10-18
+`security` · **requires a full installer run**
+
+Security fix: a one-click update can no longer skip a release that requires the installer. Only the target release was checked, so updating from 1.0.31 to a later release would have silently missed the installer-side fixes in 1.0.32 and 1.0.33. The dashboard's "needs installer" flag now considers the releases in between too. Includes the 1.0.33 security fix. Requires the installer.
+
 ## 1.0.33 (Tisza) — 2026-10-18
 `security` · **requires a full installer run**
 

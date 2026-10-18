@@ -1,8 +1,30 @@
 {
     "schema": 1,
-    "serial": 34,
+    "serial": 35,
     "channel": "stable",
     "releases": [
+        {
+            "version": "1.0.34",
+            "codename": "Tisza",
+            "tag": "v1.0.34",
+            "released_at": "2026-10-18",
+            "commit": "5d53aa8",
+            "severity": "security",
+            "requires_installer": true,
+            "min_upgrade_from": "0.0.0",
+            "schema_version": {
+                "mysql": 1,
+                "iocs": 2,
+                "logins": 3
+            },
+            "app_tarball": {
+                "path": "assets/ilexa-app.tar.gz",
+                "sha256": "82deefbbff2c53a5a81d0fb17494e3d9f4670664f3d0ef46011c582ca2cc5285",
+                "size": 2019276
+            },
+            "notes_hu": "Biztons\u00e1gi jav\u00edt\u00e1s: az egykattint\u00e1sos friss\u00edt\u00e9s t\u00f6bb\u00e9 nem ugorhat \u00e1t telep\u00edt\u0151t ig\u00e9nyl\u0151 kiad\u00e1st. Eddig csak a c\u00e9lkiad\u00e1st ellen\u0151rizte, \u00edgy p\u00e9ld\u00e1ul 1.0.31-r\u0151l egy k\u00e9s\u0151bbi kiad\u00e1sra friss\u00edtve az 1.0.32 \u00e9s 1.0.33 telep\u00edt\u0151oldali jav\u00edt\u00e1sai csendben kimaradtak volna. A vez\u00e9rl\u0151pult \"telep\u00edt\u0151 sz\u00fcks\u00e9ges\" jelz\u00e9se is a k\u00f6ztes kiad\u00e1sokat n\u00e9zi. Tartalmazza az 1.0.33 biztons\u00e1gi jav\u00edt\u00e1s\u00e1t. Telep\u00edt\u0151 sz\u00fcks\u00e9ges.",
+            "notes_en": "Security fix: a one-click update can no longer skip a release that requires the installer. Only the target release was checked, so updating from 1.0.31 to a later release would have silently missed the installer-side fixes in 1.0.32 and 1.0.33. The dashboard's \"needs installer\" flag now considers the releases in between too. Includes the 1.0.33 security fix. Requires the installer."
+        },
         {
             "version": "1.0.33",
             "codename": "Tisza",
@@ -686,6 +708,6 @@
             "notes_en": "Baseline release: version display, update checking, database migration framework."
         }
     ],
-    "latest": "1.0.33",
-    "generated_at": "2026-10-18T22:02:32Z"
+    "latest": "1.0.34",
+    "generated_at": "2026-10-18T22:15:04Z"
 }
