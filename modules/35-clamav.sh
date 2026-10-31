@@ -44,6 +44,63 @@ if [ "$DRY_RUN" != 1 ]; then
   grep -q '^LocalSocket ' "$clamd_conf" 2>/dev/null || \
     echo "LocalSocket ${CLAMD_SOCKET:-/run/clamd.scan/clamd.sock}" >> "$clamd_conf"
 fi
+
+# Socket access for rspamd (EL only -- the profile leaves CLAMD_SOCKET_DIR empty
+# where the packaging already allows it). Stock EL ships LocalSocketGroup and
+# LocalSocketMode commented out and a tmpfiles entry making the socket's
+# directory 0710 clamscan:virusgroup. _rspamd is only in $MTA_GROUP (40-rspamd),
+# so it could not even enter the directory: rspamd tagged every message
+# CLAM_VIRUS_FAIL and no mail was virus-scanned, while every service reported
+# active. The production host only worked because of hand edits from its
+# MailScanner days; this writes the same settings (the tmpfiles line is
+# byte-identical to that host's), so a re-run there is a no-op.
+clamd_restart=0
+if [ -n "${CLAMD_SOCKET_DIR:-}" ] && [ -n "${CLAMD_TMPFILES:-}" ]; then
+  if [ "$DRY_RUN" = 1 ]; then
+    log_info "[dry-run] would set LocalSocketGroup ${MTA_GROUP} / LocalSocketMode 660 in $clamd_conf and write $CLAMD_TMPFILES"
+  else
+    getent group "$MTA_GROUP" >/dev/null || die "group $MTA_GROUP missing (05-base creates it) — re-run 05-base first"
+    # clamd sets the socket's group after binding; keep its user in the group
+    # so that works whether or not it still holds root at that point.
+    id -nG "$CLAMAV_USER" 2>/dev/null | grep -qw "$MTA_GROUP" || {
+      usermod -a -G "$MTA_GROUP" "$CLAMAV_USER" && log_info "$CLAMAV_USER added to $MTA_GROUP"
+    }
+
+    # LocalSocketGroup / LocalSocketMode: replace an active line, else append.
+    # An admin's different value is replaced, but backed up and named in the log.
+    clamd_conf_changed=0
+    for kv in "LocalSocketGroup $MTA_GROUP" "LocalSocketMode 660"; do
+      key="${kv%% *}"
+      cur="$(grep -E "^${key}[[:space:]]" "$clamd_conf" 2>/dev/null | tail -n1 || true)"
+      [ "$cur" = "$kv" ] && continue
+      [ "$clamd_conf_changed" = 1 ] || { backup "$clamd_conf"; clamd_conf_changed=1; }
+      if [ -n "$cur" ]; then
+        log_warn "$clamd_conf: replacing '$cur' with '$kv' (rspamd must reach the socket)"
+        sed -i -E "s|^${key}[[:space:]].*|${kv}|" "$clamd_conf"
+      else
+        echo "$kv" >> "$clamd_conf"
+        log_info "$clamd_conf: set $kv"
+      fi
+    done
+    [ "$clamd_conf_changed" = 1 ] && clamd_restart=1
+
+    # Same file name as the package's /usr/lib/tmpfiles.d entry, so this one
+    # replaces it rather than competing with it.
+    want="d $CLAMD_SOCKET_DIR 0750 $CLAMAV_USER $MTA_GROUP -"
+    if [ "$(cat "$CLAMD_TMPFILES" 2>/dev/null)" != "$want" ]; then
+      if [ -e "$CLAMD_TMPFILES" ]; then
+        backup "$CLAMD_TMPFILES"
+        log_warn "$CLAMD_TMPFILES had different content — replaced (backup above)"
+      fi
+      printf '%s\n' "$want" > "$CLAMD_TMPFILES"
+      chmod 0644 "$CLAMD_TMPFILES"
+      log_info "wrote $CLAMD_TMPFILES: $want"
+      clamd_restart=1
+    fi
+    systemd-tmpfiles --create "$CLAMD_TMPFILES" \
+      || log_warn "systemd-tmpfiles --create $CLAMD_TMPFILES failed — $CLAMD_SOCKET_DIR may keep the package's permissions until reboot"
+  fi
+fi
 # Debian's clamav-daemon.service carries
 #   ConditionPathExistsGlob=/var/lib/clamav/daily.{c[vl]d,inc}
 # so it REFUSES to start until the signature database exists, and systemd
@@ -74,6 +131,13 @@ if [ "$DRY_RUN" != 1 ]; then
 fi
 svc_try "${CLAMD_SVC:-clamd@scan}" 2>/dev/null \
   || log_warn "${CLAMD_SVC:-clamd@scan} not enabled yet — rspamd will report CLAM_VIRUS_FAIL until it is"
+# A clamd that was already running keeps its old socket owner/mode until it
+# re-creates the socket. try-restart leaves a stopped clamd stopped.
+if [ "$DRY_RUN" != 1 ] && [ "$clamd_restart" = 1 ]; then
+  systemctl try-restart "${CLAMD_SVC:-clamd@scan}" \
+    && log_info "restarted ${CLAMD_SVC:-clamd@scan} to apply the socket permissions" \
+    || log_warn "could not restart ${CLAMD_SVC:-clamd@scan} — socket permissions apply at its next start"
+fi
 
 # ---- clamav-unofficial-sigs -------------------------------------------------
 # Third-party signature sources (Sanesecurity, SecuriteInfo, URLhaus, ...) plus

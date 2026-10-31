@@ -3,6 +3,11 @@
 Console releases, newest first. Generated from `RELEASES.json` by
 `tools/gen-changelog.py` -- edit the notes there, not here.
 
+## 1.0.35 (Tisza) — 2026-10-31
+`security` · **requires a full installer run**
+
+Installer-side fix, AlmaLinux/Rocky/RHEL only. With the stock ClamAV packaging, rspamd could not reach the clamd socket: the socket directory is 0710 clamscan:virusgroup and rspamd is not in that group, so rspamd tags every message CLAM_VIRUS_FAIL and mail is not virus-scanned, while every service reports active. The installer now sets the socket group to mtagroup (mode 660) and replaces the package's tmpfiles entry for /run/clamd.scan, and the final verify step checks that rspamd can reach the socket. Ubuntu is not affected. No console code changed. To pick it up on an existing EL host, delete /var/lib/ilexa-install/state/35-clamav.done and /var/lib/ilexa-install/state/99-verify.done, then run deploy.sh --only 35-clamav --only 99-verify --answers <your answers file>.
+
 ## 1.0.34 (Tisza) — 2026-10-18
 `security` · **requires a full installer run**
 

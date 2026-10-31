@@ -64,6 +64,20 @@ for u in "${MYSQL_SVC:-mariadb}" postfix dovecot opendkim opendmarc rspamd "${RE
          "${CLAMD_SVC:-clamd@scan}" clamav-freshclam "${WEB_SVC:-httpd}" fail2ban "${FIREWALL_SVC:-firewalld}"; do
   check_service "$u"
 done
+# rspamd must be able to reach clamd's socket. A permissions gap here is
+# invisible from service state: everything is "active" while rspamd tags
+# every message CLAM_VIRUS_FAIL and nothing is virus-scanned (stock EL did
+# exactly this -- see 35-clamav). access(2) as _rspamd covers both the
+# directory traversal and the socket's own mode. clamd creates the socket
+# only after loading its signatures, so a socket that does not exist YET is
+# a warning, not a failure.
+if [ "$DRY_RUN" != 1 ] && [ -n "${CLAMD_SOCKET:-}" ] && id _rspamd >/dev/null 2>&1; then
+  if [ ! -S "$CLAMD_SOCKET" ]; then
+    log_warn "clamd socket $CLAMD_SOCKET not present yet (still loading signatures?) — rspamd access not checked"
+  else
+    check "rspamd can reach clamd socket $CLAMD_SOCKET" runuser -u _rspamd -- test -w "$CLAMD_SOCKET"
+  fi
+fi
 if [ "$ENABLE_OTX" = yes ] && [ "$DRY_RUN" != 1 ]; then
   check "rbldnsd-otx active" systemctl is-active --quiet rbldnsd-otx
   dig +short 2.0.0.127.otx.rbl @127.0.0.1 -p 530 >/dev/null 2>&1 && log_info "OK   otx.rbl responds" || log_warn "otx.rbl not yet answering (may need first sync)"

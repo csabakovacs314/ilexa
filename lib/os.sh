@@ -44,7 +44,7 @@ os_detect() {
   esac
   export OS_FAMILY OS_ID OS_VERSION
   export PKG_MGR WEB_USER WEB_GROUP WEB_SVC WEB_CONFD WEB_LOG_DIR PHP_FPM_SVC PHP_FPM_SOCK
-  export CLAMD_SVC CLAMD_SOCKET CLAMAV_USER DOVECOT_CONFD RSPAMD_LOCALD
+  export CLAMD_SVC CLAMD_SOCKET CLAMAV_USER CLAMD_SOCKET_DIR CLAMD_TMPFILES DOVECOT_CONFD RSPAMD_LOCALD
   export MYSQL_SVC MYSQL_SOCK MYSQL_CONFD CRON_D FIREWALL_SVC HTPASSWD_BIN REDIS_PKG REDIS_SVC
   log_info "OS profile: $OS_FAMILY ($OS_ID $OS_VERSION)"
 }
@@ -81,6 +81,13 @@ os_profile_el() { # ver (9 or 10)
   CLAMD_SVC=clamd@scan
   CLAMD_SOCKET=/var/run/clamd.scan/clamd.sock
   CLAMAV_USER=clamscan
+  # The clamd package's tmpfiles entry makes the socket directory
+  # 0710 clamscan:virusgroup, and the socket's group is left unset -- so
+  # rspamd (_rspamd, a member of $MTA_GROUP only) cannot reach the socket at
+  # all and tags every message CLAM_VIRUS_FAIL. 35-clamav masks that tmpfiles
+  # file with a same-named one in /etc and sets LocalSocketGroup.
+  CLAMD_SOCKET_DIR=/run/clamd.scan
+  CLAMD_TMPFILES=/etc/tmpfiles.d/clamd.scan.conf
   DOVECOT_CONFD=/etc/dovecot/conf.d
   RSPAMD_LOCALD=/etc/rspamd/local.d
   MYSQL_SVC=mariadb
@@ -144,6 +151,11 @@ os_profile_debian() { # distro (ubuntu) ver (22.04/24.04/26.04)
   CLAMD_SVC=clamav-daemon
   CLAMD_SOCKET=/var/run/clamav/clamd.ctl
   CLAMAV_USER=clamav
+  # Debian's generated clamd.conf uses LocalSocketMode 666 under a 0755
+  # /run/clamav, so 35-clamav changes nothing here. Not yet re-confirmed on a
+  # real Ubuntu host; 99-verify checks rspamd's access on every install.
+  CLAMD_SOCKET_DIR=
+  CLAMD_TMPFILES=
   DOVECOT_CONFD=/etc/dovecot/conf.d   # dovecot's own convention, identical
                                        # across distros -- not EL-specific.
   RSPAMD_LOCALD=/etc/rspamd/local.d   # rspamd's own convention, likewise.

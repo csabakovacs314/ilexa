@@ -1,8 +1,30 @@
 {
     "schema": 1,
-    "serial": 35,
+    "serial": 36,
     "channel": "stable",
     "releases": [
+        {
+            "version": "1.0.35",
+            "codename": "Tisza",
+            "tag": "v1.0.35",
+            "released_at": "2026-10-31",
+            "commit": "3ad69de",
+            "severity": "security",
+            "requires_installer": true,
+            "min_upgrade_from": "0.0.0",
+            "schema_version": {
+                "mysql": 1,
+                "iocs": 2,
+                "logins": 3
+            },
+            "app_tarball": {
+                "path": "assets/ilexa-app.tar.gz",
+                "sha256": "b32cf70c866d678dab95e16f597f0b42532b118f4c5f86e0c7bfc6f0077cfa18",
+                "size": 2019277
+            },
+            "notes_hu": "Telep\u00edt\u0151-oldali jav\u00edt\u00e1s, csak AlmaLinux/Rocky/RHEL rendszeren. A ClamAV gy\u00e1ri csomagbe\u00e1ll\u00edt\u00e1saival az rspamd nem \u00e9rte el a clamd socketet: a socket k\u00f6nyvt\u00e1ra 0710 clamscan:virusgroup, az rspamd pedig nem tagja ennek a csoportnak, ez\u00e9rt minden levelet CLAM_VIRUS_FAIL jel\u00f6l\u00e9ssel l\u00e1t el, \u00e9s a levelek v\u00edruskeres\u00e9se elmarad, mik\u00f6zben minden szolg\u00e1ltat\u00e1s akt\u00edvnak l\u00e1tszik. A telep\u00edt\u0151 most az mtagroup csoportot \u00e1ll\u00edtja be a sockethez (660-as joggal), lecser\u00e9li a csomag /run/clamd.scan tmpfiles-bejegyz\u00e9s\u00e9t, \u00e9s a z\u00e1r\u00f3 ellen\u0151rz\u00e9s megn\u00e9zi, hogy az rspamd el\u00e9ri-e a socketet. Ubuntut nem \u00e9rinti. A konzol k\u00f3dja nem v\u00e1ltozott. Megl\u00e9v\u0151 EL g\u00e9pen t\u00f6r\u00f6ld a /var/lib/ilexa-install/state/35-clamav.done \u00e9s /var/lib/ilexa-install/state/99-verify.done f\u00e1jlt, majd futtasd: deploy.sh --only 35-clamav --only 99-verify --answers <v\u00e1laszf\u00e1jl>.",
+            "notes_en": "Installer-side fix, AlmaLinux/Rocky/RHEL only. With the stock ClamAV packaging, rspamd could not reach the clamd socket: the socket directory is 0710 clamscan:virusgroup and rspamd is not in that group, so rspamd tags every message CLAM_VIRUS_FAIL and mail is not virus-scanned, while every service reports active. The installer now sets the socket group to mtagroup (mode 660) and replaces the package's tmpfiles entry for /run/clamd.scan, and the final verify step checks that rspamd can reach the socket. Ubuntu is not affected. No console code changed. To pick it up on an existing EL host, delete /var/lib/ilexa-install/state/35-clamav.done and /var/lib/ilexa-install/state/99-verify.done, then run deploy.sh --only 35-clamav --only 99-verify --answers <your answers file>."
+        },
         {
             "version": "1.0.34",
             "codename": "Tisza",
@@ -708,6 +730,6 @@
             "notes_en": "Baseline release: version display, update checking, database migration framework."
         }
     ],
-    "latest": "1.0.34",
-    "generated_at": "2026-10-18T22:15:04Z"
+    "latest": "1.0.35",
+    "generated_at": "2026-10-31T15:10:12Z"
 }
