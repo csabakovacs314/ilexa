@@ -1,8 +1,30 @@
 {
     "schema": 1,
-    "serial": 36,
+    "serial": 37,
     "channel": "stable",
     "releases": [
+        {
+            "version": "1.0.36",
+            "codename": "Tisza",
+            "tag": "v1.0.36",
+            "released_at": "2026-11-04",
+            "commit": "ae7e786",
+            "severity": "feature",
+            "requires_installer": false,
+            "min_upgrade_from": "0.0.0",
+            "schema_version": {
+                "mysql": 1,
+                "iocs": 2,
+                "logins": 3
+            },
+            "app_tarball": {
+                "path": "assets/ilexa-app.tar.gz",
+                "sha256": "f447fbbf496df9962a89a2e56e730e295d216b44292db1fb6d2f49310d7a25e0",
+                "size": 2018830
+            },
+            "notes_hu": "A konzol vizu\u00e1lis finom\u00edt\u00e1sa, m\u0171k\u00f6d\u00e9sbeli v\u00e1ltoz\u00e1s n\u00e9lk\u00fcl. A c\u00edmk\u00e9k nagybet\u0171s ritk\u00edt\u00e1s helyett mondatkezd\u0151 \u00edr\u00e1sm\u00f3d\u00faak, a c\u00edmsorok v\u00e9konyabbak \u00e9s kevesebb bet\u0171m\u00e9retet haszn\u00e1lnak, az akt\u00edv oldals\u00e1v-elem \u00e9s az rspamd-tanul\u00e1s jelv\u00e9ny visszafogottabb, a lemez- \u00e9s mem\u00f3rias\u00e1vok 70%-ig semleges sz\u00edn\u0171ek. A sz\u00e1mok \u00e9s sz\u00e1zal\u00e9kok mindenhol a konzol nyelv\u00e9nek form\u00e1tum\u00e1t k\u00f6vetik (pl. 355 841 \u00e9s 28,93%), a feed-csemp\u00e9k a teljes d\u00e1tumot mutatj\u00e1k.",
+            "notes_en": "Visual polish of the console, no behaviour change. Labels are sentence case instead of spaced capitals, headings use lighter weights and fewer font sizes, the active sidebar item and the rspamd-learning badge are quieter, and disk/memory bars stay neutral until 70%. Numbers and percentages now use the console language's format everywhere (for example 355 841 and 28,93% in Hungarian), and feed tiles show the full date."
+        },
         {
             "version": "1.0.35",
             "codename": "Tisza",
@@ -730,6 +752,6 @@
             "notes_en": "Baseline release: version display, update checking, database migration framework."
         }
     ],
-    "latest": "1.0.35",
-    "generated_at": "2026-10-31T15:10:12Z"
+    "latest": "1.0.36",
+    "generated_at": "2026-11-04T17:26:03Z"
 }

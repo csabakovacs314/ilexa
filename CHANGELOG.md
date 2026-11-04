@@ -3,6 +3,11 @@
 Console releases, newest first. Generated from `RELEASES.json` by
 `tools/gen-changelog.py` -- edit the notes there, not here.
 
+## 1.0.36 (Tisza) — 2026-11-04
+`feature`
+
+Visual polish of the console, no behaviour change. Labels are sentence case instead of spaced capitals, headings use lighter weights and fewer font sizes, the active sidebar item and the rspamd-learning badge are quieter, and disk/memory bars stay neutral until 70%. Numbers and percentages now use the console language's format everywhere (for example 355 841 and 28,93% in Hungarian), and feed tiles show the full date.
+
 ## 1.0.35 (Tisza) — 2026-10-31
 `security` · **requires a full installer run**
 
