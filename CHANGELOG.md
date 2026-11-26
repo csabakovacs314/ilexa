@@ -3,6 +3,11 @@
 Console releases, newest first. Generated from `RELEASES.json` by
 `tools/gen-changelog.py` -- edit the notes there, not here.
 
+## 1.0.37 (Tisza) — 2026-11-26
+`fix`
+
+Fix: a community spam rule could reject legitimate mail on its own. Each community rule is capped at 5 points, but a rule scored again for every match, so mail carrying several .htm attachments (Outlook adds them as "Unnamed attachment (NNN).htm") reached 20 points and was rejected. Each community rule now counts at most once per message; this takes effect at the next daily rule sync after updating. Also: hovering a ham row in the Archive no longer turns it the same colour as spam.
+
 ## 1.0.36 (Tisza) — 2026-11-04
 `feature`
 

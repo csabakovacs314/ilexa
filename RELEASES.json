@@ -1,8 +1,30 @@
 {
     "schema": 1,
-    "serial": 37,
+    "serial": 38,
     "channel": "stable",
     "releases": [
+        {
+            "version": "1.0.37",
+            "codename": "Tisza",
+            "tag": "v1.0.37",
+            "released_at": "2026-11-26",
+            "commit": "3f08e10",
+            "severity": "fix",
+            "requires_installer": false,
+            "min_upgrade_from": "0.0.0",
+            "schema_version": {
+                "mysql": 1,
+                "iocs": 2,
+                "logins": 3
+            },
+            "app_tarball": {
+                "path": "assets/ilexa-app.tar.gz",
+                "sha256": "963ebce3c928e6e87404b72f5338d7d43f09d649d9c5021ebfa567dbfbab81e2",
+                "size": 2019806
+            },
+            "notes_hu": "Jav\u00edt\u00e1s: egy k\u00f6z\u00f6ss\u00e9gi spamszab\u00e1ly \u00f6nmag\u00e1ban is elutas\u00edthatott j\u00f3 levelet. A k\u00f6z\u00f6ss\u00e9gi szab\u00e1lyok legfeljebb 5 pontot adhatnak, de tal\u00e1latonk\u00e9nt \u00fajra sz\u00e1moltak, \u00edgy a t\u00f6bb .htm mell\u00e9kletet tartalmaz\u00f3 levelek (az Outlook \u201eN\u00e9vtelen mell\u00e9klet (NNN).htm\u201d n\u00e9ven csatolja \u0151ket) 20 pontot kaptak, \u00e9s a szerver elutas\u00edtotta \u0151ket. Mostant\u00f3l minden k\u00f6z\u00f6ss\u00e9gi szab\u00e1ly levelenk\u00e9nt legfeljebb egyszer sz\u00e1m\u00edt; a friss\u00edt\u00e9s ut\u00e1n a k\u00f6vetkez\u0151 napi szab\u00e1lyszinkronn\u00e1l l\u00e9p \u00e9letbe. Emellett az Arch\u00edvumban az eg\u00e9r alatti j\u00f3 (ham) sor m\u00e1r nem kap a spam\u00e9vel azonos sz\u00ednt.",
+            "notes_en": "Fix: a community spam rule could reject legitimate mail on its own. Each community rule is capped at 5 points, but a rule scored again for every match, so mail carrying several .htm attachments (Outlook adds them as \"Unnamed attachment (NNN).htm\") reached 20 points and was rejected. Each community rule now counts at most once per message; this takes effect at the next daily rule sync after updating. Also: hovering a ham row in the Archive no longer turns it the same colour as spam."
+        },
         {
             "version": "1.0.36",
             "codename": "Tisza",
@@ -752,6 +774,6 @@
             "notes_en": "Baseline release: version display, update checking, database migration framework."
         }
     ],
-    "latest": "1.0.36",
-    "generated_at": "2026-11-04T17:26:03Z"
+    "latest": "1.0.37",
+    "generated_at": "2026-11-26T15:08:35Z"
 }
